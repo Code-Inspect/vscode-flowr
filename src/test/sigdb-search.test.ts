@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { parseSigDbSearchQuery, matchesPattern, matchesVersion, findSigDbMatches } from '../flowr/views/sigdb-view';
-import { downloadSigDbScope, readSigDbRemotePointer } from '../package-db';
+import { downloadSigDbScope, readSigDbRemotePointer, getScopeSource, getSigDbScopeState, getSigDbBundleDir, invalidateSigDbPackageNamesCache } from '../package-db';
 
 suite('SigDB search', () => {
 	suite('parseSigDbSearchQuery', () => {
@@ -178,6 +178,43 @@ suite('SigDB search', () => {
 
 			const noMatch = await findSigDbMatches({ pkg: 'this-package-does-not-exist' }, output, 'base');
 			assert.deepStrictEqual(noMatch, []);
+		});
+
+		// a partially-downloaded scope leaves the manifest advertising shards whose files were never fetched; reading
+		// one as-is throws ENOENT. getScopeSource must mount only the present shards (flowR's excludeShards).
+		test('mounts only the shards present on disk after a partial download', async function() {
+			this.timeout(30000);
+			if(!readSigDbRemotePointer()) {
+				this.skip();
+				return;
+			}
+			await downloadSigDbScope('base');
+
+			const raw = getSigDbScopeState('base');
+			assert.ok(raw.manifestPath && raw.manifest, 'expected a downloaded base manifest');
+			if(raw.manifest.shards.length < 2) {
+				this.skip(); // need at least two shards to simulate a partial download
+				return;
+			}
+
+			// simulate "only some shards downloaded": delete every shard file except the first
+			const bundleDir = getSigDbBundleDir();
+			assert.ok(bundleDir, 'expected a bundle dir');
+			for(const shard of raw.manifest.shards.slice(1)) {
+				for(const ext of ['', '.br', '.zst']) {
+					fs.rmSync(path.join(bundleDir, shard.path + ext), { force: true });
+				}
+			}
+			invalidateSigDbPackageNamesCache();
+
+			// opening must not throw, and must still resolve packages served by the present shard
+			const source = await getScopeSource('base');
+			assert.ok(source, 'expected a usable source restricted to the present shard');
+			assert.ok(source.packageNames().length > 0, 'expected the present shard\'s packages to still be listed');
+			assert.ok(source.has('base'), 'expected base to still resolve from the present shard');
+
+			const matches = await findSigDbMatches({ pkg: '*' }, output, 'base');
+			assert.ok(matches.length > 0, 'expected the present shard\'s packages to still be searchable');
 		});
 
 		test('filters by --param (glob, position-independent) and --required, against a real function', async function() {

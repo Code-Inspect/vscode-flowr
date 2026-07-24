@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import {
 	isSigDbEnabled, getSigDbAdditionalPath, getSigDbCacheDir, getSigDbBundleDir,
-	readSigDbRemotePointer, getSigDbScopeState, safeGetSigSource,
+	readSigDbRemotePointer, getSigDbScopeState, getScopeSource,
 	downloadSigDbScope, removeSigDbScope, cranMirrorSourceUrl, cranPageUrl, rMajorVersionPageUrl, rdrrDocUrl, isSigDbFunctionS3Generic,
 	SigDbShardGroups, getDownloadedShardGroups, getDownloadedShardIds, safeSigDbCall, safeLatestVersionStr, safeFunctionsOf
 } from '../../package-db';
@@ -165,11 +165,9 @@ export class SigDbTreeDataProvider implements vscode.TreeDataProvider<SigDbNode>
 	}
 
 	private async openScopeSource(scope: Scope): Promise<PackageSignatureSource | undefined> {
-		const state = getSigDbScopeState(scope);
-		if(!state.manifestPath) {
-			return undefined;
-		}
-		return safeGetSigSource(state.manifestPath, msg => this.output.appendLine(`[SigDB] ${msg}`));
+		// mount only the shards actually on disk: a partially-downloaded scope must not list packages whose shard was
+		// never fetched, or reading each would throw ENOENT and flood the output
+		return await getScopeSource(scope, msg => this.output.appendLine(`[SigDB] ${msg}`));
 	}
 
 	private async getScopeChildren(scope: Scope, offset = 0): Promise<SigDbNode[]> {
@@ -592,12 +590,8 @@ export async function findSigDbMatches(
 	const matches: SigDbSearchMatch[] = [];
 
 	for(const scope of restrictTo ? [restrictTo] : Scopes) {
-		const state = getSigDbScopeState(scope);
-		if(!state.manifestPath) {
-			continue;
-		}
-
-		const source = await safeGetSigSource(state.manifestPath, msg => output.appendLine(`[SigDB] ${msg}`));
+		// search only the shards present on disk, so a partial download can't route lookups to a missing shard file
+		const source = await getScopeSource(scope, msg => output.appendLine(`[SigDB] ${msg}`));
 		if(!source) {
 			continue;
 		}
@@ -805,8 +799,6 @@ async function revealSafely(treeView: vscode.TreeView<SigDbNode>, dataProvider: 
 	for(const n of chain) {
 		dataProvider.pin(nodeId(n));
 	}
-	// reveal the container, then the view - each guarded independently so a missing/renamed command on another host
-	// doesn't skip the other, and neither surfaces a user-facing error (the reveal() below is the real workhorse)
 	await runCommandIfAvailable('workbench.view.extension.flowr', output);
 	await runCommandIfAvailable(`${FlowrSigDbViewId}.focus`, output);
 	try {

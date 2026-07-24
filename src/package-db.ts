@@ -9,7 +9,7 @@ import { readManifestFile, type SigDbManifest } from '@eagleoutice/flowr/project
 import { sigDbCacheDir } from '@eagleoutice/flowr/project/sigdb/decompress';
 import { selectDownloadVariants } from '@eagleoutice/flowr/project/sigdb/sigdb-download';
 import { readableExtsPreferred } from '@eagleoutice/flowr/project/sigdb/codec';
-import { getSharedSigSource, type PackageSignatureSource } from '@eagleoutice/flowr/project/sigdb/reader';
+import { getSharedSigSource, SigDatabaseSet, type PackageSignatureSource } from '@eagleoutice/flowr/project/sigdb/reader';
 import type { DecodedFunction } from '@eagleoutice/flowr/project/sigdb/decode';
 
 export const baseRPackages = new Set([
@@ -104,6 +104,21 @@ export interface SigDbScopeState {
 	manifest?:     SigDbManifest;
 }
 
+/** parsed manifests keyed by path+mtime; a `current`/`history` manifest is many MB, and getSigDbScopeState() is called per completion/hover/tree item, so re-parsing it every time thrashes the CPU. Cleared by {@link invalidateSigDbPackageNamesCache}. */
+const manifestParseCache = new Map<string, { mtimeMs: number, manifest: SigDbManifest }>();
+
+/** {@link readManifestFile}, but reuses the parse while the file is unchanged (same mtime) */
+function readManifestCached(manifestPath: string): SigDbManifest {
+	const mtimeMs = fs.statSync(manifestPath).mtimeMs;
+	const cached = manifestParseCache.get(manifestPath);
+	if(cached && cached.mtimeMs === mtimeMs) {
+		return cached.manifest;
+	}
+	const manifest = readManifestFile(manifestPath);
+	manifestParseCache.set(manifestPath, { mtimeMs, manifest });
+	return manifest;
+}
+
 /** searches bundled dir, then configured additional path, then downloaded-bundle dir, first match wins (mirrors flowR's own sigdb plugin) */
 export function getSigDbScopeState(scope: 'base' | 'current' | 'history'): SigDbScopeState {
 	const dirs = [getBundledSigDbPath(), getSigDbAdditionalPath().trim() || undefined, getSigDbBundleDir()]
@@ -115,12 +130,55 @@ export function getSigDbScopeState(scope: 'base' | 'current' | 'history'): SigDb
 			continue;
 		}
 		try {
-			return { scope, manifestPath, manifest: readManifestFile(manifestPath) };
+			return { scope, manifestPath, manifest: readManifestCached(manifestPath) };
 		} catch{
 			// fall through to the next search dir
 		}
 	}
 	return { scope };
+}
+
+/** whether a manifest shard's data file (in any shipped codec variant) is actually on disk, so we never mount a manifest that routes reads to a not-downloaded shard */
+function shardFilePresent(baseDir: string, shardPath: string): boolean {
+	const full = path.join(baseDir, shardPath);
+	return fs.existsSync(full) || fs.existsSync(`${full}.br`) || fs.existsSync(`${full}.zst`);
+}
+
+/** restricted sources (opened excluding the shards not on disk), keyed by manifest path + excluded ids; cleared by {@link invalidateSigDbPackageNamesCache} */
+const restrictedSourceCache = new Map<string, Promise<PackageSignatureSource | undefined>>();
+
+/**
+ * A signature source for `scope` that mounts only the shards actually on disk. A partially-downloaded scope (e.g.
+ * only "Top CRAN") lists every package in its manifest, but reading one whose shard was never fetched throws
+ * ENOENT; excluding the missing shards up front (flowR's own `excludeShards`) makes those packages uniformly
+ * "not available" instead of half-present. When every shard is present, the process-wide shared source is reused.
+ *
+ * Kept separate from {@link getSigDbScopeState}, whose FULL manifest still drives the tree's "X of Y downloaded"
+ * display and its "download the rest" affordance.
+ */
+export async function getScopeSource(scope: 'base' | 'current' | 'history', onError?: (message: string) => void): Promise<PackageSignatureSource | undefined> {
+	const state = getSigDbScopeState(scope);
+	if(!state.manifestPath) {
+		return undefined;
+	}
+	const baseDir = path.dirname(state.manifestPath);
+	const missing = state.manifest?.shards.filter(s => !shardFilePresent(baseDir, s.path)).map(s => s.id) ?? [];
+	if(missing.length === 0) {
+		return safeGetSigSource(state.manifestPath, onError);
+	}
+	const key = `${state.manifestPath}|${missing.slice().sort().join(',')}`;
+	let source = restrictedSourceCache.get(key);
+	if(!source) {
+		source = SigDatabaseSet.openManifest(state.manifestPath, { excludeShards: missing })
+			.then((s): PackageSignatureSource => s)
+			.catch((e: unknown): PackageSignatureSource | undefined => {
+				onError?.(`could not open ${state.manifestPath} (excluding ${missing.join(', ')}): ${e instanceof Error ? e.message : String(e)}`);
+				restrictedSourceCache.delete(key); // let a transient failure retry next time
+				return undefined;
+			});
+		restrictedSourceCache.set(key, source);
+	}
+	return source;
 }
 
 /** tolerates a corrupt/partial shard instead of throwing; callers get undefined plus an onError explanation */
@@ -134,12 +192,28 @@ export async function safeGetSigSource(manifestPath: string, onError?: (message:
 	}
 }
 
-/** a package can be listed in a manifest whose shard wasn't actually downloaded; swallow the resulting ENOENT */
+/** fs codes a signature-db read can legitimately hit when a shard isn't downloaded or isn't readable */
+const SwallowableSigDbErrorCodes = new Set(['ENOENT', 'EACCES', 'EISDIR', 'EPERM']);
+
+/** whether `e` is a "shard not available / not readable" error we treat as an absent lookup rather than a real fault - a missing shard file (ENOENT), or a corrupt/partial one that fails to decompress or parse */
+function isSwallowableSigDbError(e: unknown): boolean {
+	if(!e || typeof e !== 'object') {
+		return false;
+	}
+	const code = (e as { code?: unknown }).code;
+	if(typeof code === 'string' && SwallowableSigDbErrorCodes.has(code)) {
+		return true;
+	}
+	const message = e instanceof Error ? e.message : '';
+	return /\b(ENOENT|EACCES|decompress|decompression|brotli|zstd|inflate|corrupt|unexpected (?:end|token)|invalid (?:distance|literal|block|stored))\b/i.test(message);
+}
+
+/** a package can be listed in a manifest whose shard wasn't actually downloaded (or is corrupt); swallow the resulting fs/decompression error so best-effort lookups degrade to "not available" instead of throwing */
 export function safeSigDbCall<T>(fn: () => T): T | undefined {
 	try {
 		return fn();
 	} catch(e) {
-		if(e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT') {
+		if(isSwallowableSigDbError(e)) {
 			return undefined;
 		}
 		throw e;
@@ -227,6 +301,9 @@ let sigDbPackageNamesCache: Promise<Set<string>> | undefined;
 /** drops the {@link allSigDbPackageNames} cache; call whenever a scope's shards or the custom sigdb path setting change */
 export function invalidateSigDbPackageNamesCache(): void {
 	sigDbPackageNamesCache = undefined;
+	// a scope's present-shard set may have changed (a download/removal), so restricted sources must be reopened
+	restrictedSourceCache.clear();
+	manifestParseCache.clear();
 }
 
 /** a shard id (e.g. current-top) parsed from the release pointer's asset name <scope>.<shardId>.sigs.ndjson[.br|.zst] */
@@ -401,11 +478,7 @@ const SigDbScopeOrder = ['base', 'current', 'history'] as const;
 /** the first downloaded scope (base, then current, then history) that knows `pkg`, and its opened source */
 export async function findSigDbPackageSource(pkg: string): Promise<{ scope: 'base' | 'current' | 'history', source: PackageSignatureSource } | undefined> {
 	for(const scope of SigDbScopeOrder) {
-		const state = getSigDbScopeState(scope);
-		if(!state.manifestPath) {
-			continue;
-		}
-		const source = await safeGetSigSource(state.manifestPath);
+		const source = await getScopeSource(scope);
 		if(source?.has(pkg)) {
 			return { scope, source };
 		}
@@ -418,11 +491,7 @@ export function allSigDbPackageNames(): Promise<Set<string>> {
 	sigDbPackageNamesCache ??= (async() => {
 		const names = new Set<string>();
 		for(const scope of SigDbScopeOrder) {
-			const state = getSigDbScopeState(scope);
-			if(!state.manifestPath) {
-				continue;
-			}
-			const source = await safeGetSigSource(state.manifestPath);
+			const source = await getScopeSource(scope);
 			for(const name of source?.packageNames() ?? []) {
 				names.add(name);
 			}
