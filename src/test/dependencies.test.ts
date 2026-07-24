@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import * as assert from 'assert';
 import { activateExtension, ensureSigDbCurrentDownloaded, openTestFile } from './test-util';
 import type { Dependency } from '../flowr/views/dependency-view';
+import { unknownGuardedName } from '../flowr/views/dependency-view';
 import { downloadSigDbScope } from '../package-db';
 import { refreshSigDbConfig } from '../extension';
 
@@ -42,6 +43,17 @@ async function verifyDependencies(expected: DependencyDisplay[]) {
 }
 
 suite('dependencies', () => {
+	// regression: a namespaced call keeps its Identifier (['map','purrr',false]); it must render as valid R, not a stringified array
+	suite('unknownGuardedName', () => {
+		type Info = Parameters<typeof unknownGuardedName>[0];
+		test('renders a namespaced Identifier value as pkg::fn', () => {
+			assert.strictEqual(unknownGuardedName({ nodeId: 0, functionName: 'x', value: ['map', 'purrr', false] } as unknown as Info), 'purrr::map');
+		});
+		test('passes a plain string value through unchanged', () => {
+			assert.strictEqual(unknownGuardedName({ nodeId: 0, functionName: 'x', value: 'dplyr' } as unknown as Info), 'dplyr');
+		});
+	});
+
 	suiteSetup(async function() {
 		this.timeout(60000);
 		await activateExtension();

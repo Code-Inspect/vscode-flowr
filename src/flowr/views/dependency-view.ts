@@ -675,16 +675,16 @@ export function renderFunctionName(fn: Identifier): string {
 	}
 }
 
-function unknownGuardedName(e: DependencyInfo): string {
-	let value = e.value ?? Unknown;
-	if(value === Unknown){
-		value = `function "${renderFunctionName(e.functionName)}"`;
-		if(e.lexemeOfArgument) {
-			value = `${value}: ${e.lexemeOfArgument}`;
-		}
+/** a dependency's display name: its `value` (rendered as `pkg::fn` when it is a namespaced Identifier), else the called function's name */
+export function unknownGuardedName(e: DependencyInfo): string {
+	const value = e.value as string | Identifier | undefined;
+	if(value !== undefined && value !== Unknown) {
+		// a namespaced call keeps its Identifier (e.g. purrr::map), which must be rendered, not stringified as an array
+		return typeof value === 'string' ? value : renderFunctionName(value);
 	}
-	return value;
-};
+	const named = `function "${renderFunctionName(e.functionName)}"`;
+	return e.lexemeOfArgument ? `${named}: ${e.lexemeOfArgument}` : named;
+}
 
 function makeGroupedElements(locationMap: LocationMapQueryResult, elementsToShow: DependencyInfo[], allInfos: DependencyInfo[], verb: string, category: DependencyCategoryName, categoryInfo: DependencyCategoryInfo, dfi?: DataflowInformation, ast?: NormalizedAst, libraryVersions?: Map<string, LibraryVersionInfo>): Dependency[] {
 	/* first group by name */
