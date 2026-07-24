@@ -237,15 +237,15 @@ const emptyLocationMap: LocationMapQueryResult = { map: {
 	ids:   {}
 }, '.meta': { timing: -1 } };
 interface DependencyCategoryInfo { name: string, verb: string, icon: string, useReverseLinks?: boolean };
-const dependencyDisplayInfo: Record<DefaultDependencyCategoryName, DependencyCategoryInfo> = {
-	'library':    { name: 'Libraries', verb: 'loads the library', icon: 'library' },
-	'read':       { name: 'Imported Data', verb: 'imports the data', icon: 'file-text' },
-	'source':     { name: 'Sourced Scripts', verb: 'sources the script', icon: 'file-code' },
-	'write':      { name: 'Outputs', verb: 'produces the output', icon: 'new-file' },
-	'visualize':  { name: 'Visualizations', verb: 'visualizes the data', icon: 'graph', useReverseLinks: true },
-	'test':       { name: 'Tests', verb: 'tests for', icon: 'beaker' },
-	'undeclared': { name: 'Undeclared Dependencies', verb: 'uses the undeclared package', icon: 'warning' },
-	'unused':     { name: 'Unused Dependencies', verb: 'declares the unused package', icon: 'circle-slash' }
+/** the categories shown in the overview; `undeclared`/`unused` are deliberately excluded */
+type DisplayedCategoryName = Exclude<DefaultDependencyCategoryName, 'undeclared' | 'unused'>;
+const dependencyDisplayInfo: Record<DisplayedCategoryName, DependencyCategoryInfo> = {
+	'library':   { name: 'Libraries', verb: 'loads the library', icon: 'library' },
+	'read':      { name: 'Imported Data', verb: 'imports the data', icon: 'file-text' },
+	'source':    { name: 'Sourced Scripts', verb: 'sources the script', icon: 'file-code' },
+	'write':     { name: 'Outputs', verb: 'produces the output', icon: 'new-file' },
+	'visualize': { name: 'Visualizations', verb: 'visualizes the data', icon: 'graph', useReverseLinks: true },
+	'test':      { name: 'Tests', verb: 'tests for', icon: 'beaker' }
 };
 type Update = Dependency | undefined | null;
 class FlowrDependencyTreeView implements vscode.TreeDataProvider<Dependency> {

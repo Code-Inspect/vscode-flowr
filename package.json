@@ -640,9 +640,7 @@
               "source",
               "write",
               "visualize",
-              "test",
-              "undeclared",
-              "unused"
+              "test"
             ],
             "enumDescriptions": [
               "Libraries",
@@ -650,9 +648,7 @@
               "Sourced Scripts",
               "Outputs",
               "Visualizations",
-              "Tests",
-              "Undeclared Dependencies (used in code but not declared in DESCRIPTION/a lockfile)",
-              "Unused Dependencies (declared but never actually used)"
+              "Tests"
             ]
           },
           "default": [
@@ -1056,7 +1052,7 @@
     "watch-web": "webpack --watch"
   },
   "dependencies": {
-    "@eagleoutice/flowr": "^2.13.1",
+    "@eagleoutice/flowr": "^2.13.2",
     "assert": "^2.1.0",
     "brotli-dec-wasm": "^2.3.2",
     "browserify-zlib": "^0.2.0",

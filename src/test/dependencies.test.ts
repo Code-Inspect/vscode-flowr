@@ -21,16 +21,10 @@ function simplifyDependencies(dependencies: Dependency[] | undefined): Dependenc
 }
 
 function populateExpectedDependencies(expected: DependencyDisplay[]) {
-	// set default values for any that we didn't specify
+	// set default values for any that we didn't specify (undeclared/unused are not shown in the overview)
 	for(const def of ['Libraries', 'Imported Data', 'Sourced Scripts', 'Outputs', 'Visualizations', 'Tests']) {
 		if(expected.findIndex(e => e.label === def) < 0) {
 			expected.push({ label: def, description: '0 items', children: [] });
-		}
-	}
-	// undeclared/unused dependencies are opt-in (not in the default enabledCategories), so they render as disabled
-	for(const def of ['Undeclared Dependencies', 'Unused Dependencies']) {
-		if(expected.findIndex(e => e.label === def) < 0) {
-			expected.push({ label: def, description: 'Disabled', children: [] });
 		}
 	}
 	return expected;
