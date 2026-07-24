@@ -786,19 +786,29 @@ function ancestorChain(dataProvider: SigDbTreeDataProvider, node: SigDbNode): Si
 	return chain;
 }
 
+/** runs `command` only if the host actually registers it, so a fork/version that names things differently (e.g. Positron) or a not-yet-ready view degrades quietly instead of throwing "command not found"/"No view is registered" */
+async function runCommandIfAvailable(command: string, output: vscode.OutputChannel): Promise<void> {
+	if(!(await vscode.commands.getCommands(true)).includes(command)) {
+		output.appendLine(`[SigDB] Command "${command}" is not available on this host; skipping.`);
+		return;
+	}
+	try {
+		await vscode.commands.executeCommand(command);
+	} catch(e) {
+		output.appendLine(`[SigDB] Command "${command}" failed: ${e instanceof Error ? e.message : String(e)}`);
+	}
+}
+
 /** reveals `node`; VS Code's own `reveal()` won't force a lazy scope/package to load, so we walk the chain top-down first to materialize it */
 async function revealSafely(treeView: vscode.TreeView<SigDbNode>, dataProvider: SigDbTreeDataProvider, node: SigDbNode, output: vscode.OutputChannel, label: string): Promise<void> {
 	const chain = ancestorChain(dataProvider, node);
 	for(const n of chain) {
 		dataProvider.pin(nodeId(n));
 	}
-	try {
-		// the container itself needs revealing before the view's own .focus command can actually render it
-		await vscode.commands.executeCommand('workbench.view.extension.flowr');
-		await vscode.commands.executeCommand(`${FlowrSigDbViewId}.focus`);
-	} catch(e) {
-		output.appendLine(`[SigDB] Could not focus the Signature DB view: ${e instanceof Error ? e.message : String(e)}`);
-	}
+	// reveal the container, then the view - each guarded independently so a missing/renamed command on another host
+	// doesn't skip the other, and neither surfaces a user-facing error (the reveal() below is the real workhorse)
+	await runCommandIfAvailable('workbench.view.extension.flowr', output);
+	await runCommandIfAvailable(`${FlowrSigDbViewId}.focus`, output);
 	try {
 		// force every ancestor level to actually materialize before asking VS Code to find the leaf
 		let parent: SigDbNode | undefined;

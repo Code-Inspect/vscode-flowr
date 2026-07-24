@@ -134,22 +134,23 @@ ${JSON.stringify(getConfig(), null, 2)}
 		...registerPackageInfo(outputChannel),
 		registerCompletion());
 
-	setTimeout(() => {
-		const { dispose: disposeDep, update: updateDependencyView } = registerDependencyView(outputChannel);
-		registerCommand(context, 'vscode-flowr.dependencyView.update', async() => {
-			return await updateDependencyView();
-		});
-		context.subscriptions.push(new vscode.Disposable(() => disposeDep()));
+	// register the contributed tree views synchronously, not behind a timer: they are declared in package.json, so a
+	// window restore focuses whichever was open before a deferred registration runs, and VS Code throws "No view is
+	// registered". These calls are cheap; the heavy analysis stays lazy in each provider's getChildren()/update().
+	const { dispose: disposeDep, update: updateDependencyView } = registerDependencyView(outputChannel);
+	registerCommand(context, 'vscode-flowr.dependencyView.update', async() => {
+		return await updateDependencyView();
+	});
+	context.subscriptions.push(new vscode.Disposable(() => disposeDep()));
 
-		const { dispose: disposeProject } = registerProjectView(outputChannel);
-		const { dispose: disposeSigDb } = registerSigDbView(context, outputChannel);
-		const { dispose: disposeSigDbNotif } = registerSigDbNotifications(context, outputChannel);
-		context.subscriptions.push(
-			new vscode.Disposable(() => disposeProject()),
-			new vscode.Disposable(() => disposeSigDb()),
-			new vscode.Disposable(() => disposeSigDbNotif())
-		);
-	}, 10);
+	const { dispose: disposeProject } = registerProjectView(outputChannel);
+	const { dispose: disposeSigDb } = registerSigDbView(context, outputChannel);
+	const { dispose: disposeSigDbNotif } = registerSigDbNotifications(context, outputChannel);
+	context.subscriptions.push(
+		new vscode.Disposable(() => disposeProject()),
+		new vscode.Disposable(() => disposeSigDb()),
+		new vscode.Disposable(() => disposeSigDbNotif())
+	);
 	if(typeof process !== 'undefined' && typeof process.on === 'function') {
 		process.on('SIGINT', () => destroySession());
 	}
