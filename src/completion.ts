@@ -29,6 +29,81 @@ function textBeforePosition(document: vscode.TextDocument, position: vscode.Posi
 	return document.getText(new vscode.Range(new vscode.Position(0, 0), position));
 }
 
+const RawStringPrefix = /^[rR]['"](-*)([([{])/;
+const CloseBracketFor: Record<string, string> = { '(': ')', '[': ']', '{': '}' };
+
+/**
+ * If an R raw string opens at position `i` (e.g. r"( ... )", R'--[ ... ]--'), the index just past its close, or
+ * `-1` if it never closes (runs to the end of `text`); `undefined` if no raw string opens there. Raw strings
+ * take no backslash escapes; the delimiter is a quote, then dashes, then a bracket, closed by that run mirrored.
+ */
+function rawStringEnd(text: string, i: number): number | undefined {
+	const m = RawStringPrefix.exec(text.slice(i));
+	if(!m) {
+		return undefined;
+	}
+	const quote = text[i + 1];
+	const [, dashes, open] = m;
+	const closer = `${CloseBracketFor[open]}${dashes}${quote}`;
+	const at = text.indexOf(closer, i + m[0].length);
+	return at === -1 ? -1 : at + closer.length;
+}
+
+/** the index just past the close of the plain `"`/`'` string opening at `text[i]`, or `-1` if it never closes */
+function quotedStringEnd(text: string, i: number): number {
+	const quote = text[i];
+	for(let j = i + 1; j < text.length; j++) {
+		if(text[j] === '\\') {
+			j++; // raw content of an escape - skip the escaped char
+		} else if(text[j] === quote) {
+			return j + 1;
+		}
+	}
+	return -1;
+}
+
+/** whether `text[i-1]` is part of an R name, so an `r`/`R` at `i` belongs to that name rather than opening a raw string */
+function precededByNameChar(text: string, i: number): boolean {
+	return i > 0 && /[A-Za-z0-9._]/.test(text[i - 1]);
+}
+
+/**
+ * Whether `text` ends inside an unterminated string literal. Handles `"`/`'` strings (with `\` escapes), R raw
+ * strings (`r"(...)"`, which take no escapes), and `#` line comments (a quote in a comment opens nothing). R
+ * strings may span lines, so the whole text-before-cursor is scanned, not just the current line.
+ */
+export function endsInsideString(text: string): boolean {
+	let i = 0;
+	while(i < text.length) {
+		const c = text[i];
+		if(c === '#') {
+			const nl = text.indexOf('\n', i);
+			if(nl === -1) {
+				return false; // a line comment runs to the cursor - not a string
+			}
+			i = nl + 1;
+		} else if((c === 'r' || c === 'R') && !precededByNameChar(text, i)) {
+			const end = rawStringEnd(text, i);
+			if(end === undefined) {
+				i++; // a plain `r`/`R` name, not a raw-string prefix
+			} else if(end === -1) {
+				return true; // unterminated raw string runs to the cursor
+			} else {
+				i = end;
+			}
+		} else if(c === '"' || c === '\'') {
+			const end = quotedStringEnd(text, i);
+			if(end === -1) {
+				return true;
+			}
+			i = end;
+		} else {
+			i++;
+		}
+	}
+	return false;
+}
+
 /**
  * The range of the identifier (an R name, which may contain `.`) ending at `position`. VS Code has no built-in
  * notion of R's word boundaries - its default word pattern doesn't include `.` - so without an explicit range,
@@ -104,6 +179,8 @@ function functionCompletionItem(fn: DecodedFunction, pkg: string, version: strin
 	item.insertText = new vscode.SnippetString(`${fn.name}($0)`);
 	item.sortText = `${completionRank(fn.name)}${fn.name}`;
 	item.range = range;
+	// snippet-inserting the `(` doesn't fire its trigger character, so reopen suggestions for the argument names
+	item.command = { title: 'Suggest arguments', command: 'editor.action.triggerSuggest' };
 	return item;
 }
 
@@ -124,6 +201,12 @@ class FlowrSigDbCompletionProvider implements vscode.CompletionItemProvider {
 		const packageArgItems = await packageArgumentCompletions(textBefore, range);
 		if(packageArgItems) {
 			return token.isCancellationRequested ? [] : packageArgItems;
+		}
+
+		// past the package-argument path (which is meant to fire inside `library("...")`), an unterminated string
+		// is plain string content - offering function/argument names there is noise
+		if(endsInsideString(textBefore)) {
+			return [];
 		}
 
 		const packages = new Set([...loadedPackagesIn(textBefore), ...alwaysAvailablePackages()]);

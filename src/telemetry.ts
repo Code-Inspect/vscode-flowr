@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isWeb, registerCommand, updateStatusBar } from './extension';
+import { isWeb, updateStatusBar } from './extension';
 import { getConfig, Settings } from './settings';
 
 export abstract class Telemetry {
@@ -19,47 +19,6 @@ export class NoTelemetry extends Telemetry {
 	stop(): void {}
 	event(): void {}
 }
-
-// #if HAS_TELEMETRY
-export class LocalTelemetry extends Telemetry {
-
-	private readonly outputChannel: vscode.OutputChannel;
-	private readonly events:        Map<TelemetryEvent, TelemetryEventArgs[]> = new Map<TelemetryEvent, TelemetryEventArgs[]>();
-	private userPseudonym:          string | undefined = undefined;
-
-	constructor(outputChannel: vscode.OutputChannel) {
-		super();
-		this.outputChannel = outputChannel;
-	}
-
-	start(userPseudonym: string): void {
-		this.userPseudonym = userPseudonym;
-		this.outputChannel.appendLine('[Telemetry] Started local telemetry');
-	}
-
-	async stop(): Promise<void> {
-		const results = JSON.stringify({
-			userPseudonym: this.userPseudonym,
-			events:        Object.fromEntries(this.events)
-		});
-		const file = await vscode.workspace.openTextDocument({ language: 'json', content: results });
-		vscode.window.showTextDocument(file);
-		this.outputChannel.appendLine('[Telemetry] Stopped local telemetry');
-	}
-
-	event(event: TelemetryEvent, args: Omit<TelemetryEventArgs, 'timestamp'>): void {
-		if(!this.events.has(event)) {
-			this.events.set(event, []);
-		}
-		this.outputChannel.appendLine(`[Telemetry] Recording event ${event}`);
-		(this.events.get(event) as TelemetryEventArgs[]).push({
-			...args,
-			timestamp: Date.now()
-		});
-	}
-
-}
-// #endif
 
 /**
  * Settings-driven recording mode: streams every event as one chronological timeline into a local JSON file,
@@ -216,37 +175,6 @@ export function syncRecordingFromConfig(output: vscode.OutputChannel): void {
  *
  */
 export function registerTelemetry(context: vscode.ExtensionContext, output: vscode.OutputChannel) {
-// #if HAS_TELEMETRY
-	vscode.commands.executeCommand('setContext', 'vscode-flowr.hasTelemetry', true);
-
-	registerCommand(context, 'vscode-flowr.telemetry.start-local', async() => {
-		if(!(telemetry instanceof NoTelemetry)) {
-			vscode.window.showWarningMessage('Telemetry is already active.');
-			return;
-		}
-		const pseudonym = await vscode.window.showInputBox({ title: 'flowR Telemetry Pseudonym', prompt: 'Input the pseudonym to output telemetry data under. Telemetry is only collected locally, and only collected after a pseudonym is set. After stopping telemetry using the Stop Telemetry command, all collected data is dumped to a local JSON file.', ignoreFocusOut: true });
-		if(pseudonym?.length){
-			snapshotted.clear();
-			telemetry = new LocalTelemetry(output);
-			telemetry.start(pseudonym);
-			updateStatusBar();
-			vscode.window.showInformationMessage(`Started telemetry with pseudonym ${pseudonym}.`);
-		} else {
-			vscode.window.showWarningMessage('No pseudonym set. Not starting telemetry.');
-		}
-	});
-	registerCommand(context, 'vscode-flowr.telemetry.stop', async() => {
-		if(telemetry instanceof NoTelemetry) {
-			vscode.window.showWarningMessage('Telemetry not active.');
-			return;
-		}
-		await telemetry.stop();
-		telemetry = new NoTelemetry();
-		updateStatusBar();
-		vscode.window.showInformationMessage('Stopped telemetry.');
-	});
-	// #endif
-
 	context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(d => {
 		if(telemetryActive() && d.uri.scheme !== 'output') {
 			telemetry.event(TelemetryEvent.OpenedDocument, {

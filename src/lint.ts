@@ -70,6 +70,12 @@ export function isLocInDocument(loc: SourceLocation, document: Pick<vscode.TextD
 	return target === normalize(document.fileName) || target === normalize(document.uri.fsPath);
 }
 
+/** drops the finding's absolute file path from its message: {@link SourceLocation.format} prefixes the location with it, but the diagnostic already points at the file in the editor and Problems panel */
+export function stripFilePath(message: string, loc: SourceLocation): string {
+	const file = SourceLocation.getFile(loc);
+	return file ? message.split(`${file}:`).join('') : message;
+}
+
 class CodeAction extends vscode.CodeAction {
 
 	public readonly document:   vscode.TextDocument;
@@ -259,12 +265,13 @@ class LinterService implements vscode.CodeActionProvider<CodeAction> {
 				const range = rangeToVscodeRange(SourceLocation.getRange(finding.loc));
 				const pageName = ruleName.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 				const pageUrl = `https://github.com/flowr-analysis/flowr/wiki/[Linting Rule] ${pageName}`;
+				const message = (rule.prettyPrint['full'] as (result: LintingRuleResult<LintingRuleNames>, metadata: LintingRuleMetadata<LintingRuleNames>) => string)(
+					finding as LintingRuleResult<LintingRuleNames>,
+					finding as LintingRuleMetadata<LintingRuleNames>
+				);
 				const diag = new vscode.Diagnostic(
 					range,
-					`${ruleName}: ${(rule.prettyPrint['full'] as (result: LintingRuleResult<LintingRuleNames>, metadata: LintingRuleMetadata<LintingRuleNames>) => string)(
-						finding as LintingRuleResult<LintingRuleNames>,
-						finding as LintingRuleMetadata<LintingRuleNames>
-					)}`,
+					`${ruleName}: ${stripFilePath(message, finding.loc)}`,
 					vscode.DiagnosticSeverity.Warning
 				);
 				diag.source = this.diagnosticCollection.name;

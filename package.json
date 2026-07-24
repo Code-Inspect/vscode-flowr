@@ -214,20 +214,6 @@
         "category": "flowR"
       },
       {
-        "command": "vscode-flowr.telemetry.start-local",
-        "title": "Start Local Telemetry",
-        "category": "flowR",
-        "icon": "$(bug)",
-        "enablement": "vscode-flowr.hasTelemetry"
-      },
-      {
-        "command": "vscode-flowr.telemetry.stop",
-        "title": "Stop Telemetry",
-        "category": "flowR",
-        "icon": "$(bug)",
-        "enablement": "vscode-flowr.hasTelemetry"
-      },
-      {
         "command": "vscode-flowr.sigdb.refresh",
         "title": "Refresh Signature DB List",
         "category": "flowR",
@@ -1033,8 +1019,6 @@
     "package": "webpack --mode production --devtool hidden-source-map",
     "prewatch": "npm run copy-wasm-node",
     "watch": "webpack --watch",
-    "prewatch-telemetry": "npm run copy-wasm-node",
-    "watch-telemetry": "webpack --watch --env HAS_TELEMETRY",
     "lint": "npx eslint src/",
     "compile-tests": "npm run compile && tsc -p . --outDir out && mkdir -p out/sigdb && cp node_modules/@eagleoutice/flowr/data/sigdb/sigdb.remote.json out/sigdb/",
     "pretest": "npm run compile-tests && npm run lint",
@@ -1081,7 +1065,6 @@
     "@vscode/test-electron": "^2.5.2",
     "@vscode/test-web": "^0.0.80",
     "copy-webpack-plugin": "^14.0.0",
-    "ifdef-loader": "^2.3.2",
     "mocha": "^11.7.6",
     "ts-essentials": "^10.2.0",
     "ts-loader": "^9.6.0",

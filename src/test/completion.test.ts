@@ -1,6 +1,6 @@
 import assert from 'assert';
 import * as vscode from 'vscode';
-import { loadedPackagesIn, callBeforeCursor, packageArgumentCompletions, resolveArgNameAgainst, resolveCallArgs } from '../completion';
+import { loadedPackagesIn, callBeforeCursor, packageArgumentCompletions, resolveArgNameAgainst, resolveCallArgs, endsInsideString } from '../completion';
 import { activateExtension, ensureSigDbCurrentDownloaded } from './test-util';
 import { getConfig, Settings } from '../settings';
 
@@ -24,6 +24,50 @@ suite('completion', () => {
 
 		test('finds nothing when nothing is loaded', () => {
 			assert.deepStrictEqual(loadedPackagesIn('x <- 1'), new Set());
+		});
+	});
+
+	suite('endsInsideString', () => {
+		test('is true inside an unterminated string', () => {
+			assert.strictEqual(endsInsideString('x <- "hello wor'), true);
+			assert.strictEqual(endsInsideString('x <- \'ac'), true);
+		});
+
+		test('is false once the string is closed', () => {
+			assert.strictEqual(endsInsideString('x <- "hello" '), false);
+			assert.strictEqual(endsInsideString('x <- 1'), false);
+		});
+
+		test('respects backslash escapes', () => {
+			assert.strictEqual(endsInsideString('x <- "a\\"b'), true);
+			assert.strictEqual(endsInsideString('x <- "a\\""'), false);
+		});
+
+		test('ignores quotes inside a line comment', () => {
+			assert.strictEqual(endsInsideString('x <- 1 # a "quote'), false);
+			assert.strictEqual(endsInsideString('# "quote\nac'), false);
+		});
+
+		test('tracks strings across lines', () => {
+			assert.strictEqual(endsInsideString('x <- "line one\nline two'), true);
+		});
+
+		test('handles raw strings, which take no escapes and ignore inner quotes', () => {
+			assert.strictEqual(endsInsideString('x <- r"(hello wor'), true);
+			assert.strictEqual(endsInsideString('x <- r"(a\\"b'), true);   // no escapes: the \\" does not close it
+			assert.strictEqual(endsInsideString('x <- r"(hello)" '), false);
+			assert.strictEqual(endsInsideString('x <- R\'[a" b'), true);   // inner " does not close a raw string
+		});
+
+		test('matches the raw-string delimiter dash count and bracket type', () => {
+			assert.strictEqual(endsInsideString('x <- r"---(a)b)---" '), false); // inner )--- closes only with the right run
+			assert.strictEqual(endsInsideString('x <- r"---(a)b'), true);
+			assert.strictEqual(endsInsideString('x <- r"{a}" '), false);
+		});
+
+		test('does not treat an r/R inside a name as a raw-string prefix', () => {
+			assert.strictEqual(endsInsideString('for_r <- 1'), false);
+			assert.strictEqual(endsInsideString('myr "closed"'), false);
 		});
 	});
 
@@ -141,6 +185,16 @@ suite('completion', () => {
 			return list?.items ?? [];
 		}
 
+		// regression: accepting a function completion snippet-inserts `(`, which doesn't fire its trigger character,
+		// so the item must re-open suggestions itself to show the argument list. Match our own Function-kind item,
+		// not a word-based `acf` VS Code may pull from other open test documents.
+		test('a function completion re-triggers suggestions for its arguments', async() => {
+			const items = await completionsIn('ac', new vscode.Position(0, 2));
+			const acf = items.find(i => labelOf(i) === 'acf' && i.kind === vscode.CompletionItemKind.Function);
+			assert.ok(acf, 'expected acf to be suggested as a function');
+			assert.strictEqual(acf.command?.command, 'editor.action.triggerSuggest');
+		});
+
 		// regression test: functions from R's always-loaded packages (stats, utils, ...) used to only complete
 		// once the package was named in a library()/require() call in the same file
 		test('completes a function from a default-loaded package without any library() call', async() => {
@@ -156,6 +210,20 @@ suite('completion', () => {
 		test('pkg:::partial also offers non-exported functions', async() => {
 			const items = await completionsIn('dplyr:::', new vscode.Position(0, 8));
 			assert.ok(items.length > 0, 'expected at least one dplyr internal function to be suggested');
+		});
+
+		// regression test: general function/argument completion must not fire inside a plain string literal. Check
+		// for our own Function-kind items; a word-based `acf` from another open test document is not ours.
+		test('does not suggest function names inside a string literal', async() => {
+			const items = await completionsIn('x <- "ac', new vscode.Position(0, 8));
+			const ours = items.filter(i => i.kind === vscode.CompletionItemKind.Function);
+			assert.strictEqual(ours.length, 0, `did not expect any function completion inside a string, got: ${ours.map(labelOf).join(', ')}`);
+		});
+
+		// but package-name completion inside library("...") is deliberately a string argument, and must still work
+		test('still suggests package names inside library("...")', async() => {
+			const items = await completionsIn('library("dpl', new vscode.Position(0, 12));
+			assert.ok(items.some(i => labelOf(i) === 'dplyr'), `expected dplyr to be suggested inside library("..."), got: ${items.map(labelOf).join(', ')}`);
 		});
 
 		// regression test: the always-available package set must be user-configurable, not hardcoded

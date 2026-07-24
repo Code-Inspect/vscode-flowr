@@ -11,10 +11,7 @@ function flowrDocFilesReplacementPlugin() {
 	});
 }
 
-module.exports = env => {
-	const telemetry = env.HAS_TELEMETRY ?? false;
-	console.log(`Building with telemetry ${telemetry}`);
-
+module.exports = () => {
 	const nodeExtensionConfig = {
 		name: 'node',
 		mode: 'none', // this leaves the source code as close as possible to the original (when packaging we set this to 'production')
@@ -64,13 +61,6 @@ module.exports = env => {
 					use: [
 						{
 							loader: 'ts-loader'
-						},
-						{
-							loader: "ifdef-loader",
-							options: {
-								"ifdef-triple-slash": false,
-								"HAS_TELEMETRY": telemetry
-							}
 						}
 					]
 				}
@@ -135,13 +125,6 @@ module.exports = env => {
 					use: [
 						{
 							loader: 'ts-loader'
-						},
-						{
-							loader: "ifdef-loader",
-							options: {
-								"ifdef-triple-slash": false,
-								"HAS_TELEMETRY": telemetry
-							}
 						}
 					]
 				}

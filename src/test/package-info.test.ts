@@ -37,6 +37,18 @@ suite('package info', () => {
 		assert.ok(hover.includes('📖'), `expected a prominent documentation link, got: ${hover}`);
 	});
 
+	// regression: a `pkg::fn` call carries its namespace in the source, so the hover must resolve it without a library() load
+	test('attributes an explicit ggplot2::after_scale call without library()', async() => {
+		const doc = await vscode.workspace.openTextDocument({ language: 'r', content: 'ggplot2::after_scale(1)\n' });
+		await vscode.window.showTextDocument(doc, { preview: false });
+		const result = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', doc.uri, new vscode.Position(0, 12));
+		const contents = (result ?? [])
+			.flatMap(h => h.contents)
+			.map(c => typeof c === 'string' ? c : (c as vscode.MarkdownString).value ?? '');
+		const hover = contents.find(v => /provided by/.test(v) && v.includes('ggplot2'));
+		assert.ok(hover, `expected 'after_scale is provided by the ggplot2 package', got: ${JSON.stringify(contents)}`);
+	});
+
 	test('does not attribute a locally defined function to a package', async() => {
 		const editor = await openTestFile('package-info-example.R');
 		// `myFunction` is defined in this very file, so we must not claim it comes from a package

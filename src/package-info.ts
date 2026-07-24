@@ -152,6 +152,16 @@ function functionNameAt(ast: NormalizedAst, id: NodeId): string | undefined {
 	return node?.type === RType.FunctionCall && node.named ? node.functionName.lexeme ?? undefined : undefined;
 }
 
+/** the package + function of a `pkg::fn`/`pkg:::fn` call at `id`, from flowR's already-namespaced call identifier - the namespace is explicit in the source, so no `library()` is needed to attribute it */
+function namespacedCallAt(graph: DataflowGraph, ast: NormalizedAst, id: NodeId): { package: string, name: string } | undefined {
+	const vertex = graph.getVertex(toDataflowNode(ast, id));
+	if(vertex?.tag !== VertexType.FunctionCall) {
+		return undefined;
+	}
+	const namespace = Identifier.getNamespace(vertex.name);
+	return namespace ? { package: namespace, name: Identifier.getName(vertex.name) } : undefined;
+}
+
 function unquote(lexeme: string | undefined): string | undefined {
 	return (lexeme ?? '').replace(/^["'`]|["'`]$/g, '') || undefined;
 }
@@ -316,6 +326,13 @@ export class FlowrPackageInfoProvider implements vscode.HoverProvider, vscode.De
 
 	/** package/function attribution text: dataflow-origin call, library() load, base builtin, or a special-cased non-base builtin */
 	private async resolveSigDbInfo(resolved: ResolvedNode, document: vscode.TextDocument): Promise<string | undefined> {
+		// case 0: an explicit `pkg::fn` call - the namespace is in the source, so resolve it directly without needing a library() load
+		const explicit = namespacedCallAt(resolved.graph, resolved.ast, resolved.id);
+		if(explicit) {
+			const [result, scope] = await Promise.all([runSignatureQuery(document, explicit.package, explicit.name, this.output), resolveSigDbScopeLabel(explicit.package)]);
+			return `**\`${explicit.name}\`** is provided by the \`${explicit.package}\` package${result?.function ? `\n\n${await formatFunctionView(result.function, scope)}` : ''}`;
+		}
+
 		// case 1: a call attributed to a package (e.g. `ggplot` -> ggplot2); local variables/functions are left to other hover providers
 		const origins = originsForNode(resolved.graph, resolved.ast, resolved.id)?.origins;
 		const qualified = origins && Identifier.toQualified(origins);
@@ -373,6 +390,10 @@ export class FlowrPackageInfoProvider implements vscode.HoverProvider, vscode.De
 
 	/** the sigdb function view a call is attributed to (mirrors {@link resolveSigDbInfo}'s cases 1/3b/4), for its `sourceUrl` */
 	private async resolveAttributedFunction(resolved: ResolvedNode, document: vscode.TextDocument): Promise<SignatureFunctionView | undefined> {
+		const explicit = namespacedCallAt(resolved.graph, resolved.ast, resolved.id);
+		if(explicit) {
+			return (await runSignatureQuery(document, explicit.package, explicit.name, this.output))?.function;
+		}
 		const origins = originsForNode(resolved.graph, resolved.ast, resolved.id)?.origins;
 		const qualified = origins && Identifier.toQualified(origins);
 		const namespace = qualified && Identifier.getNamespace(qualified);

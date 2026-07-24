@@ -134,9 +134,6 @@ ${JSON.stringify(getConfig(), null, 2)}
 		...registerPackageInfo(outputChannel),
 		registerCompletion());
 
-	// register the contributed tree views synchronously, not behind a timer: they are declared in package.json, so a
-	// window restore focuses whichever was open before a deferred registration runs, and VS Code throws "No view is
-	// registered". These calls are cheap; the heavy analysis stays lazy in each provider's getChildren()/update().
 	const { dispose: disposeDep, update: updateDependencyView } = registerDependencyView(outputChannel);
 	registerCommand(context, 'vscode-flowr.dependencyView.update', async() => {
 		return await updateDependencyView();
