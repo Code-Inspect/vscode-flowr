@@ -466,6 +466,21 @@
           "default": false,
           "markdownDescription": "Whether to suggest dotted function names (e.g. `print.data.frame`, usually S3 methods) before you've typed the dot yourself. Off by default, so typing `print` only suggests `print` itself; typing `print.` still suggests `print.data.frame`."
         },
+        "vscode-flowr.completion.withRLanguageServer": {
+          "type": "string",
+          "enum": [
+            "complement",
+            "full",
+            "off"
+          ],
+          "default": "complement",
+          "enumDescriptions": [
+            "Only suggest what the R language server cannot know: functions, arguments and package names of packages that are not installed locally.",
+            "Suggest everything the signature database knows, even where that duplicates the R language server's suggestions.",
+            "Suggest nothing at all while the R language server is available."
+          ],
+          "markdownDescription": "How flowR suggests while the R extension's language server ([REditorSupport.r](https://marketplace.visualstudio.com/items?itemName=REditorSupport.r), which needs R's `languageserver` package) is available. That server completes from your actual R session, flowR from its signature database, which also covers packages you have not installed - so by default flowR only fills that gap. Has no effect when the R language server is unavailable, where flowR always suggests everything."
+        },
         "vscode-flowr.recording.enabled": {
           "type": "boolean",
           "default": false,
@@ -1036,7 +1051,7 @@
     "watch-web": "webpack --watch"
   },
   "dependencies": {
-    "@eagleoutice/flowr": "^2.13.2",
+    "@eagleoutice/flowr": "^2.13.3",
     "assert": "^2.1.0",
     "brotli-dec-wasm": "^2.3.2",
     "browserify-zlib": "^0.2.0",

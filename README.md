@@ -199,7 +199,7 @@ Hovering over a call in an R file tells you which package it stems from — for 
 
 Once a script `library()`s a package the [signature database](#signature-database) knows, the extension suggests that package's exported functions as you type, and — once you're inside a call's parentheses — its documented argument names (already-supplied named arguments are excluded). A signature-help tooltip, triggered by `(` and `,`, shows the full parameter list as you fill in a call. Suggestions are labeled with their originating package, and note on hover that they come from flowR's signature database.
 
-This is skipped automatically whenever the [R extension](https://marketplace.visualstudio.com/items?itemName=REditorSupport.r) is installed and active, since it already provides richer, R-evaluated completions and this extension would otherwise offer duplicate/conflicting suggestions.
+If the [R extension](https://marketplace.visualstudio.com/items?itemName=REditorSupport.r)'s language server is available (it is installed, `r.lsp.enabled` is on, and R's `languageserver` package is installed), the two harmonize instead of competing: that server completes from your actual R session, so by default flowR only adds what it cannot know — functions, arguments and package names of packages you do not have installed. `vscode-flowr.completion.withRLanguageServer` switches this to `full` (suggest everything, duplicates included) or `off` (leave R completions entirely to the language server). This is decided per keystroke, so installing, disabling or reconfiguring either extension takes effect without a window reload.
 
 ### Project View
 

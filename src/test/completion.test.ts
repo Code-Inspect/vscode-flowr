@@ -1,6 +1,6 @@
 import assert from 'assert';
 import * as vscode from 'vscode';
-import { loadedPackagesIn, callBeforeCursor, packageArgumentCompletions, resolveArgNameAgainst, resolveCallArgs, endsInsideString } from '../completion';
+import { loadedPackagesIn, callBeforeCursor, packageArgumentCompletions, resolveArgNameAgainst, resolveCallArgs, endsInsideString, coexistenceWith, notCoveredBy } from '../completion';
 import { activateExtension, ensureSigDbCurrentDownloaded } from './test-util';
 import { getConfig, Settings } from '../settings';
 
@@ -151,6 +151,42 @@ suite('completion', () => {
 
 		test('does not treat an unrelated named argument as the package-name argument', async() => {
 			assert.strictEqual(await packageArgumentCompletions('library(x = dp'), undefined);
+		});
+
+		// with the R language server around, it already completes the packages you have installed - we add the rest of CRAN
+		test('leaves out the packages the R language server already covers', async() => {
+			const all = await packageArgumentCompletions('library(');
+			assert.ok(all && all.length > 0);
+			const covered = labelOf(all[0]);
+			const items = await packageArgumentCompletions('library(', undefined, coexistenceWith('complement', new Set([covered])));
+			assert.ok(items);
+			assert.ok(!items.some(item => labelOf(item) === covered), `expected ${covered} to be left to the R language server`);
+			assert.strictEqual(items.length, all.length - 1, 'expected every other package to still be suggested');
+		});
+	});
+
+	suite('coexistence with the R language server', () => {
+		test('complement mode leaves the installed packages to the language server, keeping the rest', () => {
+			const coexist = coexistenceWith('complement', new Set(['dplyr']));
+			assert.strictEqual(coexist.silent, false);
+			assert.deepStrictEqual(notCoveredBy(['dplyr', 'ggplot2'], coexist), ['ggplot2']);
+		});
+
+		// an unknown installed set means no R to ask - a duplicate suggestion beats silently having none
+		test('complement mode suggests everything when the installed packages are unknown', () => {
+			const coexist = coexistenceWith('complement', undefined);
+			assert.strictEqual(coexist.silent, false);
+			assert.deepStrictEqual(notCoveredBy(['dplyr', 'ggplot2'], coexist), ['dplyr', 'ggplot2']);
+		});
+
+		test('full mode suggests installed packages too', () => {
+			const coexist = coexistenceWith('full', new Set(['dplyr']));
+			assert.strictEqual(coexist.silent, false);
+			assert.deepStrictEqual(notCoveredBy(['dplyr', 'ggplot2'], coexist), ['dplyr', 'ggplot2']);
+		});
+
+		test('off mode stays silent entirely', () => {
+			assert.strictEqual(coexistenceWith('off', new Set(['dplyr'])).silent, true);
 		});
 	});
 

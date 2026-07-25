@@ -80,7 +80,7 @@ class FlowrHoverProvider implements vscode.HoverProvider {
 			return undefined;
 		}
 
-		this.output.appendLine(`[Hover Values] Resolving value at ${document.uri.toString()}:${pos.line + 1}:${pos.character + 1}`);
+		this.output.appendLine(`[Hover Values] Resolving val. @${document.uri.toString()}:${pos.line + 1}:${pos.character + 1}`);
 
 		const [criteria] = await makeSlicingCriteriaForPositions([pos], document, session);
 		if(!criteria || token.isCancellationRequested) {

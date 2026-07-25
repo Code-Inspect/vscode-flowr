@@ -56,6 +56,7 @@ export enum Settings {
 	CompletionEnabled = 'completion.enabled',
 	CompletionAlwaysAvailablePackages = 'completion.alwaysAvailablePackages',
 	CompletionShowS3Methods = 'completion.showS3Methods',
+	CompletionWithRlanguageServer = 'completion.withRLanguageServer',
 
 	RecordingEnabled = 'recording.enabled',
 	RecordingAcronym = 'recording.acronym',

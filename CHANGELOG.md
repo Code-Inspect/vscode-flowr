@@ -1,3 +1,16 @@
+# Version 0.8.3 (2026-07-25)
+- Update to flowR 2.13.3, fixing cursor-position resolution so slicing, reconstruct, value hovers and package links no longer come up empty or resolve to a too-broad node (e.g. a whole `cat(x)` call instead of the `x` under the cursor)
+- Harmonize autocompletion with the R extension's language server instead of switching off whenever it is installed: flowR now adds what that server cannot know (functions, arguments and package names of packages you do not have installed), configurable via the new `vscode-flowr.completion.withRLanguageServer` setting
+- Fix autocompletion being silently unavailable depending on which extension activated first, or when the R extension is installed without R's `languageserver` package
+- Hover and Go to Definition now work for functions called via `::`/`:::`, without needing a `library()` load, since the namespace is already explicit in the source
+- Fix autocompletion not re-opening the suggestion list for a function's arguments after accepting its name
+- Drop the redundant absolute file path from linter messages, which already point at their file via the editor and the Problems panel
+- Render namespaced calls in the dependency view as `pkg::fn` instead of stringifying their identifier (e.g. `map,purrr,false`)
+- Fix a "No view is registered" error after an update by registering the contributed tree views synchronously instead of behind a timer, while keeping their analysis lazy
+- A partially downloaded signature database (e.g. only "Top CRAN") now reports its missing packages as unavailable instead of erroring, mounting only the shards actually on disk; manifest parses are cached, so hovers and completions no longer re-read many megabytes each time
+- Hide the undeclared/unused dependency categories from the dependency view overview
+- Remove the local telemetry commands and their build flag
+
 # Version 0.8.2 (2026-07-21)
 - Update to flowR 2.13.1, fixing a webpack bundling break caused by flowR's new doc-files module
 - Autocomplete package names for library, attach and similar calls, with the newest known version shown alongside

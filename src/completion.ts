@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { allKnownPackageNames, defaultLoadedPackages, findSigDbPackageSource, resolveSigDbPackageVersion, safeFunctionsOf, safeLatestVersionStr, safeSigDbCall } from './package-db';
-import { getInstalledVersion } from './installed-packages';
+import { getInstalledPackageVersions, getInstalledVersion } from './installed-packages';
 import { getConfig, Settings } from './settings';
 import type { PackageSignatureSource } from '@eagleoutice/flowr/project/sigdb/reader';
 import type { DecodedFunction } from '@eagleoutice/flowr/project/sigdb/decode';
@@ -184,21 +184,93 @@ function functionCompletionItem(fn: DecodedFunction, pkg: string, version: strin
 	return item;
 }
 
+/** the R extension, whose language server (the R `languageserver` package) also completes R code */
+const RExtensionId = 'reditorsupport.r';
+
+function rExtensionInstalled(): boolean {
+	return vscode.extensions.getExtension(RExtensionId) !== undefined;
+}
+
+/**
+ * Whether the R extension's language server is serving this session. Deliberately *not* based on the extension's
+ * `isActive`: both extensions activate on the same R document, in an order VS Code does not guarantee, so an
+ * activation-time `isActive` check answers differently from run to run. What does hold for the whole session is
+ * that the extension is installed, its `r.lsp.enabled` is on, and its server - the R `languageserver` package -
+ * is actually installed (without it vscode-R only offers to install it and completes nothing).
+ */
+async function rLanguageServerLive(): Promise<boolean> {
+	if(!rExtensionInstalled() || vscode.workspace.getConfiguration('r.lsp').get<boolean>('enabled', true) === false) {
+		return false;
+	}
+	const installed = await getInstalledPackageVersions();
+	return installed === undefined || installed.has('languageserver');
+}
+
+/** how flowR's suggestions are narrowed to coexist with the R language server, see {@link Settings.CompletionWithRlanguageServer} */
+export interface Coexistence {
+	/** whether flowR contributes nothing at all, leaving completion entirely to the R language server */
+	silent:           boolean;
+	/** packages the R language server already suggests from (the locally installed ones), so flowR does not repeat them */
+	coveredPackages?: ReadonlySet<string>;
+}
+
+/** flowR alone: everything the signature database knows is offered */
+const Alone: Coexistence = { silent: false };
+
+/**
+ * How flowR narrows its suggestions while the R language server is live, for the configured `mode` and the
+ * `installedPackages` that server can see. Not knowing what is installed (no R around) falls back to suggesting
+ * everything: a duplicate suggestion is a much smaller problem than silently having none.
+ */
+export function coexistenceWith(mode: string, installedPackages: ReadonlySet<string> | undefined): Coexistence {
+	switch(mode) {
+		case 'off':
+			return { silent: true };
+		case 'full':
+			return Alone;
+		default:
+			// the language server evaluates the real R session, so it covers installed packages far better than we can;
+			// what it cannot see is everything *not* installed, which is most of what the signature database holds
+			return installedPackages ? { silent: false, coveredPackages: installedPackages } : Alone;
+	}
+}
+
+/**
+ * Recomputed per request rather than latched at registration - the R extension may be installed, enabled, or
+ * disabled at any point in a session, and its `r.lsp.enabled` toggled, all without a window reload.
+ */
+async function rLanguageServerCoexistence(): Promise<Coexistence> {
+	if(!await rLanguageServerLive()) {
+		return Alone;
+	}
+	const installed = await getInstalledPackageVersions();
+	return coexistenceWith(getConfig().get<string>(Settings.CompletionWithRlanguageServer, 'complement'), installed && new Set(installed.keys()));
+}
+
+/** the packages of `packages` the R language server does not already cover */
+export function notCoveredBy(packages: Iterable<string>, coexist: Coexistence | undefined): string[] {
+	return [...packages].filter(pkg => !coexist?.coveredPackages?.has(pkg));
+}
+
 class FlowrSigDbCompletionProvider implements vscode.CompletionItemProvider {
 	async provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken): Promise<vscode.CompletionItem[]> {
 		if(!completionEnabled()) {
+			return [];
+		}
+		const coexist = await rLanguageServerCoexistence();
+		if(coexist.silent || token.isCancellationRequested) {
 			return [];
 		}
 		const textBefore = textBeforePosition(document, position);
 
 		const range = identifierRange(document, position);
 
-		const namespaced = await this.namespacedFunctionCompletions(textBefore, range);
+		const namespaced = await this.namespacedFunctionCompletions(textBefore, range, coexist);
 		if(namespaced) {
 			return token.isCancellationRequested ? [] : namespaced;
 		}
 
-		const packageArgItems = await packageArgumentCompletions(textBefore, range);
+		const packageArgItems = await packageArgumentCompletions(textBefore, range, coexist);
 		if(packageArgItems) {
 			return token.isCancellationRequested ? [] : packageArgItems;
 		}
@@ -209,7 +281,7 @@ class FlowrSigDbCompletionProvider implements vscode.CompletionItemProvider {
 			return [];
 		}
 
-		const packages = new Set([...loadedPackagesIn(textBefore), ...alwaysAvailablePackages()]);
+		const packages = new Set(notCoveredBy([...loadedPackagesIn(textBefore), ...alwaysAvailablePackages()], coexist));
 		const typedHasDot = (/[A-Za-z][A-Za-z0-9._]*$/.exec(textBefore)?.[0] ?? '').includes('.');
 		const [functionItems, argumentItems] = await Promise.all([
 			this.functionNameCompletions(packages, typedHasDot, range),
@@ -219,12 +291,15 @@ class FlowrSigDbCompletionProvider implements vscode.CompletionItemProvider {
 	}
 
 	/** completions for a `pkg::partial`/`pkg:::partial` call, from that specific package regardless of whether it is loaded, or `undefined` if the cursor isn't in one */
-	private async namespacedFunctionCompletions(textBefore: string, range: vscode.Range): Promise<vscode.CompletionItem[] | undefined> {
+	private async namespacedFunctionCompletions(textBefore: string, range: vscode.Range, coexist?: Coexistence): Promise<vscode.CompletionItem[] | undefined> {
 		const match = NamespacedCallPattern.exec(textBefore);
 		if(!match) {
 			return undefined;
 		}
 		const [, pkg, colons, partial] = match;
+		if(coexist?.coveredPackages?.has(pkg)) {
+			return [];
+		}
 		const found = await findSigDbPackageSource(pkg);
 		if(!found) {
 			return [];
@@ -436,13 +511,13 @@ function packageNameCompletionItem(label: string, insertText: string, range: vsc
 }
 
 /** completions for a `library(...)`/`attach(...)`/... package-name argument, or `undefined` if the cursor isn't in one */
-export async function packageArgumentCompletions(textBeforeCursor: string, range?: vscode.Range): Promise<vscode.CompletionItem[] | undefined> {
+export async function packageArgumentCompletions(textBeforeCursor: string, range?: vscode.Range, coexist?: Coexistence): Promise<vscode.CompletionItem[] | undefined> {
 	const call = callBeforeCursor(textBeforeCursor);
 	const info = call && PackageArgFunctions.get(call.fnName);
 	if(!call || !info || !await isAtPackageArgPosition(call, info)) {
 		return undefined;
 	}
-	const names = [...await allKnownPackageNames()].sort((a, b) => a.localeCompare(b));
+	const names = notCoveredBy(await allKnownPackageNames(), coexist).sort((a, b) => a.localeCompare(b));
 	const items = names.map(pkg => packageNameCompletionItem(pkg, pkg, range));
 	if(PackageColonForms.has(call.fnName)) {
 		items.push(...names.map(pkg => packageNameCompletionItem(`package:${pkg}`, `package:${pkg}`, range)));
@@ -455,11 +530,16 @@ class FlowrSigDbSignatureHelpProvider implements vscode.SignatureHelpProvider {
 		if(!completionEnabled()) {
 			return undefined;
 		}
+		const coexist = await rLanguageServerCoexistence();
+		if(coexist.silent) {
+			return undefined;
+		}
 		const call = callBeforeCursor(document.getText(new vscode.Range(new vscode.Position(0, 0), position)));
 		if(!call) {
 			return undefined;
 		}
-		const found = await findFunctionInLoadedPackages(call.fnName, loadedPackagesIn(textBeforePosition(document, position)));
+		// returning `undefined` for a package the R language server covers lets its own signature help win, rather than ours shadowing it
+		const found = await findFunctionInLoadedPackages(call.fnName, notCoveredBy(loadedPackagesIn(textBeforePosition(document, position)), coexist));
 		if(!found || token.isCancellationRequested) {
 			return undefined;
 		}
@@ -486,16 +566,12 @@ class FlowrSigDbSignatureHelpProvider implements vscode.SignatureHelpProvider {
 	}
 }
 
-/** whether REditorSupport.r is active - it already provides richer, R-evaluated completions, so we stay out of its way */
-function rLanguageServerActive(): boolean {
-	const ext = vscode.extensions.getExtension('reditorsupport.r');
-	return !!ext?.isActive;
-}
-
-/** registers R/Rmd completion + signature help for `library()`d packages, backed by whichever sigdb scopes are downloaded; skipped if REditorSupport.r is active */
+/** registers R/Rmd completion + signature help for `library()`d packages, backed by whichever sigdb scopes are downloaded */
 export function registerCompletion(): vscode.Disposable {
-	if(rLanguageServerActive()) {
-		return new vscode.Disposable(() => { /* nothing registered */ });
+	// warms the installed-package list (one Rscript call) so the first keystroke doesn't wait on it to decide how to
+	// coexist with the R language server; only worth it if that extension is around at all
+	if(rExtensionInstalled()) {
+		void getInstalledPackageVersions();
 	}
 	const selectors: vscode.DocumentSelector[] = [{ language: 'r' }, { language: 'rmd' }];
 	return vscode.Disposable.from(
