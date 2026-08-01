@@ -1,3 +1,10 @@
+# Version 0.8.4 (2026-08-01)
+- Update to flowR 2.13.8: a braceless loop body (`for(f in files) read.csv(f)`) is no longer mistaken for a quotation, so its reads/writes show up in the dependency view and its symbols are linted; `.Rmd` chunk options parse correctly; and package versions are also guessed for orphan dependencies
+- No longer suggest function and argument names inside a string literal, including multi-line and raw strings (`r"(...)"`), while still completing package names inside `library("...")`
+- Hovers no longer claim a signature-database origin for calls flowR models itself (primitives like `+`, `if`, and configured built-ins), and stop marking every parameter of such a call as optional; they now also show flowR's own call properties (e.g. `pure`, `reads`) and which argument is returned
+- Read `DESCRIPTION` and `rproject.toml` in the project view through flowR's own file API instead of extension-side regexes, so the two stay in step; `uvr.toml` projects are now recognized as well
+- Offer the `syntactically-valid` linting rule in the `vscode-flowr.linter.enabledRules` setting, which flowR has but the setting did not list
+
 # Version 0.8.3 (2026-07-25)
 - Update to flowR 2.13.3, fixing cursor-position resolution so slicing, reconstruct, value hovers and package links no longer come up empty or resolve to a too-broad node (e.g. a whole `cat(x)` call instead of the `x` under the cursor)
 - Harmonize autocompletion with the R extension's language server instead of switching off whenever it is installed: flowR now adds what that server cannot know (functions, arguments and package names of packages you do not have installed), configurable via the new `vscode-flowr.completion.withRLanguageServer` setting

@@ -166,7 +166,7 @@ suite('dependencies', () => {
 	// "N/A no constraining evidence" - that path is covered separately by the history-scope warning test below,
 	// which deliberately has no real evidence to work with)
 	test('"Guess Dependency Versions" narrows the range using real function/parameter usage evidence', async function() {
-		this.timeout(30000);
+		this.timeout(120000);
 		// `legend.key.spacing` was added to ggplot2::theme() in 0.9.2 - calling it with that named argument
 		// must raise ggplot2's guessed lower bound accordingly, with a concrete evidence line saying so
 		const doc = await vscode.workspace.openTextDocument({

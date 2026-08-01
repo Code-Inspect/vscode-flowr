@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
-	classifyLibrary, dedupeLibraries, parseDescription, parseDescriptionMeta, parseRenvLock, parseRenvLockMeta,
-	parseRvLock, parseRvToml, parseRvTomlMeta, satisfiesDeclaredVersion, lockfileSyncReport, pickDeclaredRVersion
+	classifyLibrary, dedupeLibraries, readDescription, parseRenvLock, parseRenvLockMeta, parseRvLock,
+	readRProject, readUvrManifest, satisfiesDeclaredVersion, lockfileSyncReport, pickDeclaredRVersion
 } from '../flowr/views/project-view';
 import { downloadSigDbScope, readSigDbRemotePointer } from '../package-db';
 
@@ -88,29 +88,36 @@ suite('project view manifest parsing', () => {
 			'Suggests: testthat (>= 3.0.0)',
 			'License: MIT'
 		].join('\n');
-		const libs = parseDescription(desc);
+		const libs = readDescription(desc).libraries;
 		const names = libs.map(l => l.name);
 		assert.ok(names.includes('dplyr'), `expected dplyr, got ${names.join(', ')}`);
 		assert.ok(names.includes('purrr'));
 		assert.ok(names.includes('rlang'));
 		assert.ok(names.includes('methods'));
 		assert.ok(names.includes('testthat'));
-		// R itself must not be reported as a library (it's the language, not a package); dplyr's version constraint should be captured
+		// dplyr's version constraint should be captured (normalized by flowR); R is dropped by dedupeLibraries
 		const dplyr = libs.find(l => l.name === 'dplyr');
-		assert.equal(dplyr?.declaredVersion, '>= 1.0.0');
+		assert.equal(dplyr?.declaredVersion, '>=1.0.0');
 	});
 
 	test('reads the package name and version a DESCRIPTION describes itself', () => {
 		const desc = 'Package: ggplot2\nType: Package\nVersion: 3.5.1\nImports: rlang\n';
-		const meta = parseDescriptionMeta(desc);
+		const meta = readDescription(desc);
 		assert.equal(meta.packageName, 'ggplot2');
 		assert.equal(meta.packageVersion, '3.5.1');
 	});
 
 	test('reads the minimum R version a DESCRIPTION declares', () => {
-		assert.equal(parseDescriptionMeta('Package: x\nDepends: R (>= 4.1.0), methods\n').declaredRVersion, '4.1.0');
-		assert.equal(parseDescriptionMeta('Package: x\nDepends:\n    methods,\n    R (>= 3.6)\n').declaredRVersion, '3.6');
-		assert.equal(parseDescriptionMeta('Package: x\nImports: rlang\n').declaredRVersion, undefined);
+		assert.equal(readDescription('Package: x\nDepends: R (>= 4.1.0), methods\n').declaredRVersion, '4.1.0');
+		assert.equal(readDescription('Package: x\nDepends:\n    methods,\n    R (>= 3.6)\n').declaredRVersion, '3.6.0');
+		assert.equal(readDescription('Package: x\nImports: rlang\n').declaredRVersion, undefined);
+		assert.equal(readDescription('Package: x\nDepends: R\n').declaredRVersion, undefined);
+	});
+
+	test('a malformed DESCRIPTION yields nothing instead of throwing', () => {
+		const meta = readDescription('not a dcf at all');
+		assert.equal(meta.packageName, undefined);
+		assert.deepEqual(meta.libraries, []);
 	});
 
 	test('reads the R version an renv.lock pins', () => {
@@ -121,7 +128,7 @@ suite('project view manifest parsing', () => {
 
 	test('reads the project name and R version an rproject.toml declares', () => {
 		const toml = '[project]\nname = "myproject"\nr_version = "4.4"\ndependencies = ["dplyr"]\n\n[other]\nname = "decoy"\n';
-		const meta = parseRvTomlMeta(toml);
+		const meta = readRProject(toml);
 		assert.equal(meta.packageName, 'myproject');
 		assert.equal(meta.declaredRVersion, '4.4');
 	});
@@ -191,13 +198,44 @@ suite('project view manifest parsing', () => {
 
 	test('parses rproject.toml dependency array', () => {
 		const toml = [
+			'[project]',
 			'name = "myproject"',
 			'dependencies = [',
 			'    "dplyr",',
 			'    { name = "purrr", repository = "CRAN" },',
 			']'
 		].join('\n');
-		const libs = parseRvToml(toml);
+		const libs = readRProject(toml).libraries;
 		assert.deepEqual(libs.map(l => l.name).sort(), ['dplyr', 'purrr']);
+	});
+
+	test('a malformed rproject.toml yields nothing instead of throwing', () => {
+		const meta = readRProject('[project\nname = ');
+		assert.equal(meta.packageName, undefined);
+		assert.deepEqual(meta.libraries, []);
+	});
+
+	test('parses a uvr.toml manifest, keeping its dev-dependencies apart from its dependencies', () => {
+		const toml = [
+			'[project]',
+			'name = "uvrproject"',
+			'r_version = "4.4.1"',
+			'',
+			'[dependencies]',
+			'ggplot2 = ">=3.0.0"',
+			'dplyr = "*"',
+			'',
+			'[dev-dependencies]',
+			'testthat = "*"'
+		].join('\n');
+		const meta = readUvrManifest(toml);
+		assert.equal(meta.packageName, 'uvrproject');
+		assert.equal(meta.declaredRVersion, '4.4.1');
+		assert.deepEqual(meta.libraries.map(l => l.name).sort(), ['dplyr', 'ggplot2', 'testthat']);
+		assert.equal(meta.libraries.find(l => l.name === 'ggplot2')?.declaredVersion, '>=3.0.0');
+	});
+
+	test('a uvr.toml that only states an R requirement pins no R version', () => {
+		assert.equal(readUvrManifest('[project]\nname = "p"\nr_version = ">=4.0.0"\n').declaredRVersion, undefined);
 	});
 });

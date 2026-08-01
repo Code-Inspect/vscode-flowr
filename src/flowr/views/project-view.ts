@@ -4,6 +4,11 @@ import { baseRPackages, isSigDbEnabled, findSigDbPackageSource, safeLatestVersio
 import { getInstalledPackageVersions } from '../../installed-packages';
 import { setProjectDeclaredRVersion } from '../../extension';
 import { RRange } from '@eagleoutice/flowr/util/r-version';
+import { FlowrInlineTextFile } from '@eagleoutice/flowr/project/context/flowr-file';
+import { FlowrDescriptionFile } from '@eagleoutice/flowr/project/plugins/file-plugins/files/flowr-description-file';
+import { FlowrRProjectFile, FlowrUvrManifestFile } from '@eagleoutice/flowr/project/plugins/file-plugins/files/flowr-manifest-files';
+import type { Package } from '@eagleoutice/flowr/project/plugins/package-version-plugins/package';
+import { minVersion } from 'semver';
 
 export const FlowrProjectViewId = 'flowr-project';
 
@@ -136,7 +141,7 @@ export function registerProjectView(output: vscode.OutputChannel): { dispose: ()
 	let treeView: vscode.TreeView<ProjectNode> | undefined;
 
 	// re-scan when project manifests appear/change/disappear or the workspace layout changes
-	const watcher = vscode.workspace.createFileSystemWatcher('**/{renv.lock,DESCRIPTION,rv.lock,rproject.toml}');
+	const watcher = vscode.workspace.createFileSystemWatcher('**/{renv.lock,DESCRIPTION,rv.lock,rproject.toml,uvr.toml}');
 	const refresh = () => void data.refresh();
 	watcher.onDidCreate(refresh);
 	watcher.onDidChange(refresh);
@@ -308,23 +313,23 @@ function libraryTreeItem(node: LibraryNode): vscode.TreeItem {
 
 /* ------------------------------------------------------------------ detection ------------------------------------------------------------------ */
 
-/** binds a manifest file name to the project kind it represents and the parsers that read it */
+/** binds a manifest file name to the project kind it represents and the reader that lifts it */
 interface ManifestDetector {
 	file:     string;
 	kind:     string;
 	lockfile: boolean;
 	/** the declaring manifest in the same folder this lockfile resolves (checked for sync) */
 	partner?: string;
-	parse:    (content: string) => DeclaredLibrary[];
-	/** optional: extract what the manifest says about itself (name/version/declared R version) */
-	meta?:    (content: string) => ManifestMeta;
+	/** what the manifest declares, plus what it says about itself (name/version/declared R version) */
+	read:     (content: string, path: string) => ManifestMeta & { libraries: DeclaredLibrary[] };
 }
 
 const manifestDetectors: readonly ManifestDetector[] = [
-	{ file: 'renv.lock', kind: 'renv', lockfile: true, partner: 'DESCRIPTION', parse: parseRenvLock, meta: parseRenvLockMeta },
-	{ file: 'DESCRIPTION', kind: 'DESCRIPTION', lockfile: false, parse: parseDescription, meta: parseDescriptionMeta },
-	{ file: 'rv.lock', kind: 'rv', lockfile: true, partner: 'rproject.toml', parse: parseRvLock },
-	{ file: 'rproject.toml', kind: 'rv', lockfile: false, parse: parseRvToml, meta: parseRvTomlMeta }
+	{ file: 'renv.lock', kind: 'renv', lockfile: true, partner: 'DESCRIPTION', read: readRenvLock },
+	{ file: 'DESCRIPTION', kind: 'DESCRIPTION', lockfile: false, read: readDescription },
+	{ file: 'rv.lock', kind: 'rv', lockfile: true, partner: 'rproject.toml', read: readRvLock },
+	{ file: 'rproject.toml', kind: 'rv', lockfile: false, read: readRProject },
+	{ file: 'uvr.toml', kind: 'uvr', lockfile: false, read: readUvrManifest }
 ];
 
 /** the R version the project declares: an exact lockfile pin wins over a DESCRIPTION's Depends minimum */
@@ -338,7 +343,7 @@ async function detectManifests(output: vscode.OutputChannel): Promise<ProjectMan
 	const manifests: ProjectManifest[] = [];
 	for(const folder of folders) {
 		const perFolder: ProjectManifest[] = [];
-		for(const { file, kind, lockfile, parse, meta } of manifestDetectors) {
+		for(const { file, kind, lockfile, read } of manifestDetectors) {
 			const uri = vscode.Uri.joinPath(folder.uri, file);
 			let content: string;
 			try {
@@ -347,7 +352,8 @@ async function detectManifests(output: vscode.OutputChannel): Promise<ProjectMan
 				continue; // file does not exist
 			}
 			try {
-				perFolder.push({ uri, label: file, kind, lockfile, ...meta?.(content), libraries: dedupeLibraries(parse(content)) });
+				const { libraries, ...meta } = read(content, uri.fsPath);
+				perFolder.push({ uri, label: file, kind, lockfile, ...meta, libraries: dedupeLibraries(libraries) });
 			} catch(e) {
 				output.appendLine(`[Project View] Failed to parse ${uri.fsPath}: ${(e as Error).message}`);
 				perFolder.push({ uri, label: file, kind, lockfile, libraries: [] });
@@ -405,6 +411,63 @@ export function dedupeLibraries(libraries: DeclaredLibrary[]): DeclaredLibrary[]
 	return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** what a flowR {@link Package} declares, in the shape the tree renders */
+function toDeclaredLibraries(packages: readonly Package[] | undefined): DeclaredLibrary[] {
+	return (packages ?? []).map(p => ({ name: p.name, declaredVersion: p.versionConstraints[0]?.raw }));
+}
+
+/** the lowest concrete version a constraint admits, e.g. `4.1.0` for a `DESCRIPTION`'s `R (>= 4.1.0)` */
+function declaredMinimum(pkg: Package | undefined): string | undefined {
+	const range = pkg?.versionConstraints[0];
+	return range ? minVersion(range)?.version : undefined;
+}
+
+/** Reads a `DESCRIPTION` through flowR's own {@link FlowrDescriptionFile}. */
+export function readDescription(content: string, path = 'DESCRIPTION'): ManifestMeta & { libraries: DeclaredLibrary[] } {
+	const description = FlowrDescriptionFile.from(new FlowrInlineTextFile(path, content));
+	const declared = [
+		...description.depends() ?? [], ...description.imports() ?? [],
+		...description.linkingTo() ?? [], ...description.suggests() ?? []
+	];
+	return {
+		packageName:      description.packageName(),
+		packageVersion:   description.version()?.str,
+		declaredRVersion: declaredMinimum(declared.find(p => p.name === 'R')),
+		libraries:        toDeclaredLibraries(declared)
+	};
+}
+
+/** Reads an rv `rproject.toml` through flowR's own {@link FlowrRProjectFile}. */
+export function readRProject(content: string, path = 'rproject.toml'): ManifestMeta & { libraries: DeclaredLibrary[] } {
+	const project = FlowrRProjectFile.from(new FlowrInlineTextFile(path, content));
+	return {
+		packageName:      project.projectName(),
+		declaredRVersion: project.rVersion(),
+		libraries:        toDeclaredLibraries(project.dependencies())
+	};
+}
+
+/** Reads a uvr `uvr.toml` through flowR's own {@link FlowrUvrManifestFile}. */
+export function readUvrManifest(content: string, path = 'uvr.toml'): ManifestMeta & { libraries: DeclaredLibrary[] } {
+	const manifest = FlowrUvrManifestFile.from(new FlowrInlineTextFile(path, content));
+	const declares = manifest.declares();
+	return {
+		packageName:      manifest.projectName(),
+		declaredRVersion: manifest.rVersion(),
+		libraries:        toDeclaredLibraries([...declares.imports ?? [], ...declares.suggests ?? []])
+	};
+}
+
+/** Reads an `renv.lock`; flowR only parses these inside its analyzer plugins, so this stays extension-side for now. */
+export function readRenvLock(content: string): ManifestMeta & { libraries: DeclaredLibrary[] } {
+	return { ...parseRenvLockMeta(content), libraries: parseRenvLock(content) };
+}
+
+/** Reads an `rv.lock`; flowR only parses these inside its analyzer plugins, so this stays extension-side for now. */
+export function readRvLock(content: string): { libraries: DeclaredLibrary[] } {
+	return { libraries: parseRvLock(content) };
+}
+
 /** Extracts the declared packages (with versions) from a `renv.lock` file's `Packages` object. */
 export function parseRenvLock(content: string): DeclaredLibrary[] {
 	const lock = JSON.parse(content) as { Packages?: Record<string, { Package?: string, Version?: string }> };
@@ -424,14 +487,6 @@ export interface ManifestMeta {
 	declaredRVersion?: string;
 }
 
-/** Extracts the package this `DESCRIPTION` describes itself (`Package:`/`Version:`) and its `Depends: R (>= …)` minimum R version. */
-export function parseDescriptionMeta(content: string): ManifestMeta {
-	const unfolded = content.replace(/\r\n/g, '\n').replace(/\n[ \t]+/g, ' ');
-	const field = (name: string) => new RegExp(`^${name}\\s*:\\s*(.+)$`, 'm').exec(unfolded)?.[1].trim();
-	const rDep = /^Depends\s*:.*?\bR\s*\(\s*(?:>=|>)?\s*([0-9][0-9.-]*)\s*\)/m.exec(unfolded)?.[1];
-	return { packageName: field('Package'), packageVersion: field('Version'), declaredRVersion: rDep };
-}
-
 /** Extracts the R version an `renv.lock` pins (`{"R": {"Version": "4.3.1"}}`). */
 export function parseRenvLockMeta(content: string): ManifestMeta {
 	try {
@@ -442,34 +497,6 @@ export function parseRenvLockMeta(content: string): ManifestMeta {
 	}
 }
 
-/** Extracts the project name and declared R version from an `rproject.toml`'s `[project]` table. */
-export function parseRvTomlMeta(content: string): ManifestMeta {
-	const project = /\[project\]([\s\S]*?)(?=\n\s*\[|$)/.exec(content)?.[1] ?? '';
-	const key = (name: string) => new RegExp(`^\\s*${name}\\s*=\\s*"([^"]+)"`, 'm').exec(project)?.[1];
-	return { packageName: key('name'), declaredRVersion: key('r_version') };
-}
-
-/** Extracts the packages listed in the `Depends`/`Imports`/`Suggests`/`LinkingTo` fields of a `DESCRIPTION` file. */
-export function parseDescription(content: string): DeclaredLibrary[] {
-	// DESCRIPTION is a DCF file; the dependency fields are comma-separated, possibly wrapped across lines
-	const fields = ['Depends', 'Imports', 'Suggests', 'LinkingTo'];
-	const libraries: DeclaredLibrary[] = [];
-	// unfold continuation lines (which start with whitespace) into their field
-	const unfolded = content.replace(/\r\n/g, '\n').replace(/\n[ \t]+/g, ' ');
-	for(const line of unfolded.split('\n')) {
-		const match = /^([A-Za-z]+)\s*:\s*(.*)$/.exec(line);
-		if(!match || !fields.includes(match[1])) {
-			continue;
-		}
-		for(const part of match[2].split(',')) {
-			const dep = /^\s*([A-Za-z][A-Za-z0-9._]*)\s*(?:\(([^)]*)\))?/.exec(part);
-			if(dep) {
-				libraries.push({ name: dep[1], declaredVersion: dep[2]?.trim() || undefined });
-			}
-		}
-	}
-	return libraries;
-}
 
 /** Extracts the packages from an `rv.lock` TOML file's `[[packages]]` tables. */
 export function parseRvLock(content: string): DeclaredLibrary[] {
@@ -500,33 +527,5 @@ export function parseRvLock(content: string): DeclaredLibrary[] {
 		}
 	}
 	flush();
-	return libraries;
-}
-
-/** Extracts the packages from the `dependencies = [ ... ]` array of an `rproject.toml` (rv) file. */
-export function parseRvToml(content: string): DeclaredLibrary[] {
-	// rproject.toml declares dependencies as an array of names (possibly with inline detail tables)
-	const libraries: DeclaredLibrary[] = [];
-	const depsMatch = /dependencies\s*=\s*\[([\s\S]*?)\]/.exec(content);
-	if(!depsMatch) {
-		return libraries;
-	}
-	let body = depsMatch[1];
-	// inline detail tables carry the package under name = "..."; strip them so other keys aren't mistaken for package names
-	const inlineTable = /\{[^}]*\}/g;
-	let table: RegExpExecArray | null;
-	while((table = inlineTable.exec(body)) !== null) {
-		const name = /\bname\s*=\s*"([A-Za-z][A-Za-z0-9._]*)"/.exec(table[0]);
-		if(name) {
-			libraries.push({ name: name[1] });
-		}
-	}
-	body = body.replace(inlineTable, '');
-	// the remaining entries are bare quoted package names
-	const bare = /"([A-Za-z][A-Za-z0-9._]*)"/g;
-	let m: RegExpExecArray | null;
-	while((m = bare.exec(body)) !== null) {
-		libraries.push({ name: m[1] });
-	}
 	return libraries;
 }

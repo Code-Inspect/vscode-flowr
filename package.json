@@ -303,7 +303,7 @@
             "tree-sitter",
             "r-shell"
           ],
-          "markdownDescription": "The flowR engine to use when parsi5ng R code. For more information, see the [engines documentation](https://github.com/flowr-analysis/flowr/wiki/Engines). This setting is ignored when running the extension in the browser, as tree-sitter mode is always used."
+          "markdownDescription": "The flowR engine to use when parsing R code. For more information, see the [engines documentation](https://github.com/flowr-analysis/flowr/wiki/Engines). This setting is ignored when running the extension in the browser, as tree-sitter mode is always used."
         },
         "vscode-flowr.style.sliceOpacity": {
           "type": "number",
@@ -683,7 +683,8 @@
               "software-has-license",
               "software-has-tests",
               "no-leaked-credentials",
-              "undefined-symbol"
+              "undefined-symbol",
+              "syntactically-valid"
             ],
             "enumDescriptions": [
               "Marks deprecated functions that should not be used anymore.",
@@ -702,7 +703,8 @@
               "Checks whether the project provides a license.",
               "Checks whether the project has tests.",
               "Detects hardcoded credentials (experimental).",
-              "Flags calls to functions that are neither defined locally, a known builtin, nor exported by a loaded package (experimental)."
+              "Flags calls to functions that are neither defined locally, a known builtin, nor exported by a loaded package (experimental).",
+              "Reports syntax errors the parser had to recover from, with quick fixes where possible (off by default)."
             ]
           },
           "default": [
@@ -722,7 +724,7 @@
             "no-leaked-credentials",
             "undefined-symbol"
           ],
-          "markdownDescription": "The names of the linting rules that should be enabled. See [the wiki](https://github.com/flowr-analysis/flowr/wiki/Linter#linting-rules) for a list of linting rules and their identifiers. By default, all rules except `naming-convention` and `roxygen-arguments` are enabled. An empty array causes _all_ linting rules (including `naming-convention`) to be enabled."
+          "markdownDescription": "The names of the linting rules that should be enabled. See [the wiki](https://github.com/flowr-analysis/flowr/wiki/Linter#linting-rules) for a list of linting rules and their identifiers. By default, all rules except `naming-convention`, `roxygen-arguments` and `syntactically-valid` are enabled. An empty array causes _all_ linting rules (including those three) to be enabled."
         },
         "vscode-flowr.linter.ruleConfigs": {
           "type": "object",
@@ -1051,7 +1053,7 @@
     "watch-web": "webpack --watch"
   },
   "dependencies": {
-    "@eagleoutice/flowr": "^2.13.3",
+    "@eagleoutice/flowr": "^2.13.8",
     "assert": "^2.1.0",
     "brotli-dec-wasm": "^2.3.2",
     "browserify-zlib": "^0.2.0",

@@ -7,7 +7,7 @@ import { Identifier } from '@eagleoutice/flowr/dataflow/environments/identifier'
 import type { NodeId } from '@eagleoutice/flowr/r-bridge/lang-4.x/ast/model/processing/node-id';
 import type { NormalizedAst } from '@eagleoutice/flowr/r-bridge/lang-4.x/ast/model/processing/decorate';
 import type { DataflowGraph } from '@eagleoutice/flowr/dataflow/graph/graph';
-import { VertexType, isVariableDefinitionVertex } from '@eagleoutice/flowr/dataflow/graph/vertex';
+import { FunctionCallVertex, FunctionDefinitionVertex, VariableDefinitionVertex } from '@eagleoutice/flowr/dataflow/graph/vertex';
 import { DfEdge, EdgeType } from '@eagleoutice/flowr/dataflow/graph/edge';
 import { RType } from '@eagleoutice/flowr/r-bridge/lang-4.x/ast/model/type';
 import { baseRPackages, defaultLoadedPackages, getSigDbScopeState, findSigDbPackageSource, resolveSigDbPackageVersion, rMajorVersionPageUrl, allKnownPackageNames, closestPackageNames, cranPageUrl } from './package-db';
@@ -78,17 +78,20 @@ async function resolveSigDbScopeLabel(pkg: string): Promise<string | undefined> 
 }
 
 /** `name = default`, `name` (required), or `name?` (optional without a shown default) */
-function formatParameter(p: SignatureParameterView): string {
+function formatParameter(p: SignatureParameterView, noDefaultsKnown = false): string {
 	if(p.default !== undefined) {
 		return `${p.name} = ${p.default}`;
 	}
-	return p.required ? p.name : `${p.name}?`;
+	// a flowR-only view records no defaults at all, so its `required: false` says nothing about optionality
+	return p.required || noDefaultsKnown ? p.name : `${p.name}?`;
 }
 
 async function formatFunctionView(fn: SignatureFunctionView, scope?: string): Promise<string> {
 	const link = fn.sourceUrl ? `[\`${fn.package}::${fn.name}\`](${fn.sourceUrl})` : `\`${fn.package}::${fn.name}\``;
-	const signature = `\`\`\`r\n${fn.name}(${fn.parameters.map(formatParameter).join(', ')})\n\`\`\``;
-	const parts = [`resolved via the${scope ? ` \`${scope}\`` : ''} signature database as ${link}`];
+	const signature = `\`\`\`r\n${fn.name}(${fn.parameters.map(p => formatParameter(p, fn.flowrOnly)).join(', ')})\n\`\`\``;
+	const parts = [fn.flowrOnly
+		? `modeled by flowR itself as ${link} — the signature database has no entry for it`
+		: `resolved via the${scope ? ` \`${scope}\`` : ''} signature database as ${link}`];
 	if(fn.version) {
 		parts.push(`\`v${fn.version}\``);
 	}
@@ -102,7 +105,9 @@ async function formatFunctionView(fn: SignatureFunctionView, scope?: string): Pr
 		fn.properties.includes('deprecated') ? '⚠ deprecated' : undefined,
 		fn.properties.includes('can-throw') ? '⚠ can throw' : undefined,
 		fn.s3generic ? '🔀 S3 generic' : undefined,
-		fn.s3method ? `🔀 S3 method for \`${fn.s3method.generic}\` (\`${fn.s3method.package}\`), class \`${fn.s3method.class}\`` : undefined
+		fn.s3method ? `🔀 S3 method for \`${fn.s3method.generic}\` (\`${fn.s3method.package}\`), class \`${fn.s3method.class}\`` : undefined,
+		fn.flowr?.props.length ? `flowR: ${fn.flowr.props.map(p => `\`${p}\``).join(', ')}` : undefined,
+		fn.flowr?.returns ? `returns \`${fn.flowr.returns}\`` : undefined
 	].filter((f): f is string => !!f);
 	// the documentation link leads, large (a heading), rather than being buried at the end of the inline summary
 	const docLink = wantsHelpDoc ? `#### 📖 Documentation: [${helpDoc?.title ?? fn.name}](${fn.docUrl})\n\n` : '';
@@ -155,7 +160,7 @@ function functionNameAt(ast: NormalizedAst, id: NodeId): string | undefined {
 /** the package + function of a `pkg::fn`/`pkg:::fn` call at `id`, from flowR's already-namespaced call identifier - the namespace is explicit in the source, so no `library()` is needed to attribute it */
 function namespacedCallAt(graph: DataflowGraph, ast: NormalizedAst, id: NodeId): { package: string, name: string } | undefined {
 	const vertex = graph.getVertex(toDataflowNode(ast, id));
-	if(vertex?.tag !== VertexType.FunctionCall) {
+	if(!FunctionCallVertex.is(vertex)) {
 		return undefined;
 	}
 	const namespace = Identifier.getNamespace(vertex.name);
@@ -306,7 +311,7 @@ async function resolveNode(document: vscode.TextDocument, pos: vscode.Position, 
 /** the node at `id` itself if it is a variable/function definition vertex, otherwise the local definition its origin points to (if any) */
 function definitionIdFor(resolved: ResolvedNode): NodeId | undefined {
 	const vertex = resolved.graph.getVertex(resolved.id) ?? resolved.graph.getVertex(toDataflowNode(resolved.ast, resolved.id));
-	if(vertex && (isVariableDefinitionVertex(vertex) || vertex.tag === VertexType.FunctionDefinition)) {
+	if(VariableDefinitionVertex.is(vertex) || FunctionDefinitionVertex.is(vertex)) {
 		return resolved.id;
 	}
 	const origins = originsForNode(resolved.graph, resolved.ast, resolved.id)?.origins;
@@ -480,7 +485,7 @@ export class FlowrPackageInfoProvider implements vscode.HoverProvider, vscode.De
 
 		// clicking a definition itself (not a use of it) has no origin to resolve; report it as its own location instead of nothing
 		const vertex = resolved.graph.getVertex(resolved.id) ?? resolved.graph.getVertex(toDataflowNode(resolved.ast, resolved.id));
-		if(vertex && (isVariableDefinitionVertex(vertex) || vertex.tag === VertexType.FunctionDefinition)) {
+		if(VariableDefinitionVertex.is(vertex) || FunctionDefinitionVertex.is(vertex)) {
 			const loc = resolved.ast.idMap.get(resolved.id)?.location;
 			if(loc) {
 				return new vscode.Location(document.uri, rangeToVscodeRange(loc));
