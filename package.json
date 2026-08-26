@@ -641,7 +641,9 @@
               "source",
               "write",
               "visualize",
-              "test"
+              "test",
+              "statistics",
+              "remote"
             ],
             "enumDescriptions": [
               "Libraries",
@@ -649,7 +651,9 @@
               "Sourced Scripts",
               "Outputs",
               "Visualizations",
-              "Tests"
+              "Tests",
+              "Statistical Tests",
+              "Remote Installs"
             ]
           },
           "default": [
@@ -658,7 +662,9 @@
             "source",
             "write",
             "visualize",
-            "test"
+            "test",
+            "statistics",
+            "remote"
           ],
           "markdownDescription": "When using the dependency view, which dependency categories should be detected. Can also be toggled by right-clicking on a category in the dependency view itself."
         },
@@ -1053,7 +1059,7 @@
     "watch-web": "webpack --watch"
   },
   "dependencies": {
-    "@eagleoutice/flowr": "^2.13.8",
+    "@eagleoutice/flowr": "^2.15.2",
     "assert": "^2.1.0",
     "brotli-dec-wasm": "^2.3.2",
     "browserify-zlib": "^0.2.0",

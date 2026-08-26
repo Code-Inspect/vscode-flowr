@@ -23,7 +23,6 @@ import type { DataflowInformation } from '@eagleoutice/flowr/dataflow/info';
 import type { QueryResponseMessage } from '@eagleoutice/flowr/cli/repl/server/messages/message-query';
 import type { PipelineOutput } from '@eagleoutice/flowr/core/steps/pipeline/pipeline';
 import type { DEFAULT_SLICING_PIPELINE } from '@eagleoutice/flowr/core/steps/pipeline/default-pipelines';
-import { extractCfgQuick } from '@eagleoutice/flowr/control-flow/extract-cfg';
 import { getConfig, isVerbose, Settings } from '../settings';
 import type { DiagramSelectionMode } from './diagrams/diagram-definitions';
 import type { CfgSimplificationPassName } from '@eagleoutice/flowr/control-flow/cfg-simplification';
@@ -214,11 +213,15 @@ export class FlowrServerSession implements FlowrSession {
 		const response = await this.requestFileAnalysis(document);
 		const selectionNodes = selectionsToNodeIds(response.results.normalize.ast.files.map(f => f.root), selections);
 
+		if(response.cfg === undefined) {
+			return '';
+		}
+
 		const normalize: NormalizedAst = {
 			...response.results.normalize,
 			idMap: new BiMap()
 		};
-		return cfgToMermaid(extractCfgQuick(normalize), normalize, {
+		return cfgToMermaid(response.cfg, normalize, {
 			includeOnlyIds: selectionMode === 'hide' ? selectionNodes : undefined,
 			mark:           selectionMode === 'highlight' ? selectionNodes : undefined,
 			simplify:       simplified,
@@ -276,6 +279,7 @@ export class FlowrServerSession implements FlowrSession {
 			filename: document.fileName,
 			filetoken,
 			format:   'json',
+			cfg:      true,
 			content:  consolidateNewlines(document.getText())
 		});
 	}

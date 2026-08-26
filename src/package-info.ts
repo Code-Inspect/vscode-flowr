@@ -78,17 +78,13 @@ async function resolveSigDbScopeLabel(pkg: string): Promise<string | undefined> 
 }
 
 /** `name = default`, `name` (required), or `name?` (optional without a shown default) */
-function formatParameter(p: SignatureParameterView, noDefaultsKnown = false): string {
-	if(p.default !== undefined) {
-		return `${p.name} = ${p.default}`;
-	}
-	// a flowR-only view records no defaults at all, so its `required: false` says nothing about optionality
-	return p.required || noDefaultsKnown ? p.name : `${p.name}?`;
+function formatParameter(p: SignatureParameterView): string {
+	return p.default !== undefined ? `${p.name} = ${p.default}` : p.name;
 }
 
 async function formatFunctionView(fn: SignatureFunctionView, scope?: string): Promise<string> {
 	const link = fn.sourceUrl ? `[\`${fn.package}::${fn.name}\`](${fn.sourceUrl})` : `\`${fn.package}::${fn.name}\``;
-	const signature = `\`\`\`r\n${fn.name}(${fn.parameters.map(p => formatParameter(p, fn.flowrOnly)).join(', ')})\n\`\`\``;
+	const signature = `\`\`\`r\n${fn.name}(${fn.parameters.map(p => formatParameter(p)).join(', ')})\n\`\`\``;
 	const parts = [fn.flowrOnly
 		? `modeled by flowR itself as ${link} — the signature database has no entry for it`
 		: `resolved via the${scope ? ` \`${scope}\`` : ''} signature database as ${link}`];

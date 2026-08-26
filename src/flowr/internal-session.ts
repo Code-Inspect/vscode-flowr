@@ -23,7 +23,6 @@ import { makeMagicCommentHandler } from '@eagleoutice/flowr/reconstruct/auto-sel
 import type { DataflowInformation } from '@eagleoutice/flowr/dataflow/info';
 import { FlowrAnalyzerBuilder } from '@eagleoutice/flowr/project/flowr-analyzer-builder';
 import { sigDbSummary } from '../package-db';
-import type { PipelinePerStepMetaInformation } from '@eagleoutice/flowr/core/steps/pipeline/pipeline';
 import { FlowrInlineTextFile } from '@eagleoutice/flowr/project/context/flowr-file';
 import type { FlowrAnalyzer } from '@eagleoutice/flowr/project/flowr-analyzer';
 import type { CfgSimplificationPassName } from '@eagleoutice/flowr/control-flow/cfg-simplification';
@@ -399,7 +398,7 @@ export class FlowrInternalSession implements FlowrSession {
 		}
 
 		return withAnalyzer(document, this.parser, async analyzer => {
-			const dataflow = await analyzer.dataflow() as DataflowInformation & PipelinePerStepMetaInformation;
+			const dataflow = await analyzer.dataflow();
 			const normalize = await analyzer.normalize();
 
 			if(normalize.hasError && (normalize.ast.files as unknown[])?.length === 0) {

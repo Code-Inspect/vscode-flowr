@@ -11,6 +11,7 @@ import { getInstalledVersion, getHelpDoc } from '../../installed-packages';
 import type { PackageSignatureSource } from '@eagleoutice/flowr/project/sigdb/reader';
 import type { DecodedFunction, SigParameter } from '@eagleoutice/flowr/project/sigdb/decode';
 import { RRange, RVersion } from '@eagleoutice/flowr/util/r-version';
+import { ArgProp } from '@eagleoutice/flowr/dataflow/environments/built-in-props';
 
 const GlobChars = /[*?]/;
 
@@ -38,15 +39,7 @@ export function matchesVersion(pattern: string, version: string): boolean {
 }
 
 function formatSignature(params: readonly SigParameter[]): string {
-	return params.map(p => {
-		let s = p.name;
-		if(p.default !== undefined) {
-			s += ` = ${p.default}`;
-		} else if(p.optional) {
-			s += '?';
-		}
-		return s;
-	}).join(', ');
+	return params.map(p => p.default !== undefined ? `${p.name} = ${p.default}` : p.name).join(', ');
 }
 
 export const FlowrSigDbViewId = 'flowr-sigdb';
@@ -571,12 +564,12 @@ export interface SigDbSearchMatch {
 	fnName?:  string;
 }
 
-/** mirrors flowR's own `parameterFilter` (signature-query-executor.js) */
+/** mirrors flowR's own `parameterFilter` (signature-query-executor.ts) */
 function matchesParameterFilter(fn: DecodedFunction, parameters: string[] | undefined, requiredParameters: number | undefined): boolean {
 	if(parameters && !parameters.every(pat => fn.signature.some(p => matchesPattern(pat, p.name)))) {
 		return false;
 	}
-	return requiredParameters === undefined || fn.signature.filter(p => p.name !== '...' && !p.optional).length === requiredParameters;
+	return requiredParameters === undefined || fn.signature.filter(p => p.name !== '...' && (p.props & ArgProp.NoDefault) !== 0).length === requiredParameters;
 }
 
 /** resolves a parsed query against every downloaded scope with flowR's own wildcard semantics; a plain exact name stays a cheap has() check */

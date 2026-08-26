@@ -240,12 +240,14 @@ interface DependencyCategoryInfo { name: string, verb: string, icon: string, use
 /** the categories shown in the overview; `undeclared`/`unused` are deliberately excluded */
 type DisplayedCategoryName = Exclude<DefaultDependencyCategoryName, 'undeclared' | 'unused'>;
 const dependencyDisplayInfo: Record<DisplayedCategoryName, DependencyCategoryInfo> = {
-	'library':   { name: 'Libraries', verb: 'loads the library', icon: 'library' },
-	'read':      { name: 'Imported Data', verb: 'imports the data', icon: 'file-text' },
-	'source':    { name: 'Sourced Scripts', verb: 'sources the script', icon: 'file-code' },
-	'write':     { name: 'Outputs', verb: 'produces the output', icon: 'new-file' },
-	'visualize': { name: 'Visualizations', verb: 'visualizes the data', icon: 'graph', useReverseLinks: true },
-	'test':      { name: 'Tests', verb: 'tests for', icon: 'beaker' }
+	'library':    { name: 'Libraries', verb: 'loads the library', icon: 'library' },
+	'read':       { name: 'Imported Data', verb: 'imports the data', icon: 'file-text' },
+	'source':     { name: 'Sourced Scripts', verb: 'sources the script', icon: 'file-code' },
+	'write':      { name: 'Outputs', verb: 'produces the output', icon: 'new-file' },
+	'visualize':  { name: 'Visualizations', verb: 'visualizes the data', icon: 'graph', useReverseLinks: true },
+	'test':       { name: 'Tests', verb: 'tests for', icon: 'beaker' },
+	'statistics': { name: 'Statistical Tests', verb: 'performs statistical test', icon: 'search' },
+	'remote':     { name: 'Remote Installs', verb: 'installs', icon: 'cloud-download' }
 };
 type Update = Dependency | undefined | null;
 class FlowrDependencyTreeView implements vscode.TreeDataProvider<Dependency> {
