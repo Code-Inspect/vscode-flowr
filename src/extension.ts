@@ -13,6 +13,7 @@ import { version as flowrPackageVersion } from '@eagleoutice/flowr/package.json'
 import { registerDependencyInternalCommands, registerDependencyView } from './flowr/views/dependency-view';
 import { DropPathsOption, FlowrConfig, InferWorkingDirectory, VariableResolve  } from '@eagleoutice/flowr/config';
 import type { BuiltInDefinitions } from '@eagleoutice/flowr/dataflow/environments/built-in-config';
+import type { MergeableRecord } from '@eagleoutice/flowr/util/objects';
 import { deepMergeObject } from '@eagleoutice/flowr/util/objects';
 import { registerLintCommands } from './lint';
 import { NoTelemetry, RecordingTelemetry, registerTelemetry, telemetry, TelemetryEvent } from './telemetry';
@@ -457,7 +458,7 @@ function updateFlowrConfig() {
 	const config = getConfig();
 	const wasmRoot = getWasmRootPath();
 	// we don't want to *amend* here since updates to our extension config shouldn't add additional entries while keeping old ones (definitions etc.)
-	VSCodeFlowrConfiguration = deepMergeObject<FlowrConfig>(FlowrConfig.default(), {
+	VSCodeFlowrConfiguration = deepMergeObject(FlowrConfig.default() as unknown as MergeableRecord, {
 		ignoreSourceCalls: config.get<boolean>(Settings.IgnoreSourceCalls, false),
 		solver:            {
 			variables:     config.get<VariableResolve>(Settings.SolverVariableHandling, VariableResolve.Alias),
@@ -484,5 +485,5 @@ function updateFlowrConfig() {
 			treeSitterWasmPath: `${wasmRoot}/tree-sitter.wasm`,
 			lax:                config.get<boolean>(Settings.TreeSitterLax, true)
 		}]
-	} as Partial<FlowrConfig>);
+	} as Partial<FlowrConfig>) as unknown as FlowrConfig;
 }
