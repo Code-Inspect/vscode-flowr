@@ -21,13 +21,20 @@ function simplifyDependencies(dependencies: Dependency[] | undefined): Dependenc
 }
 
 function populateExpectedDependencies(expected: DependencyDisplay[]) {
+	const expectedSorted = [];
+
 	// set default values for any that we didn't specify (undeclared/unused are not shown in the overview)
-	for(const def of ['Libraries', 'Imported Data', 'Sourced Scripts', 'Outputs', 'Visualizations', 'Tests']) {
-		if(expected.findIndex(e => e.label === def) < 0) {
-			expected.push({ label: def, description: '0 items', children: [] });
+	for(const def of ['Libraries', 'Imported Data', 'Sourced Scripts', 'Outputs', 'Visualizations', 'Tests', 'Statistical Tests', 'Remote Installs']) {
+		const idx = expected.findIndex(e => e.label === def);
+
+		if(idx < 0) {
+			expectedSorted.push({ label: def, description: '0 items', children: [] });
+		} else {
+			expectedSorted.push(expected[idx]);
 		}
 	}
-	return expected;
+
+	return expectedSorted;
 }
 
 async function verifyDependencies(expected: DependencyDisplay[]) {
@@ -67,7 +74,13 @@ suite('dependencies', () => {
 				{ label: 'd', description: 'by "library" in (L. 5)', children: [] },
 				{ label: 'e', description: 'by "library" in (L. 5)', children: [] },
 				{ label: 'f', description: 'by "library" in (L. 5)', children: [] },
-			] }
+			] },
+			{
+				label:       'Outputs', description: '2 items', children:    [
+					{ label: 'stdout', description: 'by "lapply" in (L. 2)', children: [] },
+					{ label: 'stdout', description: 'by "vapply" in (L. 5)', children: [] },
+				]
+			}
 		]);
 	});
 
